@@ -19,6 +19,8 @@ Spliit is a free and open source alternative to Splitwise. You can either use th
 - [x] Search for expenses in a group [(#51)](https://github.com/spliit-app/spliit/issues/51)
 - [x] Upload and attach images to expenses [(#63)](https://github.com/spliit-app/spliit/issues/63)
 - [x] Create expense by scanning a receipt [(#23)](https://github.com/spliit-app/spliit/issues/23)
+- [x] List the items an expense is made up of, and split it by them — fork only, see [Expense items](#expense-items)
+- [x] Read receipts with Google Gemini as well as OpenAI — fork only, see [Reading receipts with Gemini instead](#reading-receipts-with-gemini-instead)
 
 ### Possible incoming features
 
@@ -259,16 +261,28 @@ The model defaults to `gpt-5-nano` and can be changed with the optional `OPENAI_
 
 #### Reading receipts with Gemini instead
 
-Receipts can also be read by Google's [Gemini API](https://ai.google.dev/gemini-api/docs), which has a free tier. Set a key for it and receipts go to Gemini; everything else is unchanged:
+Receipts can also be read by Google's [Gemini API](https://ai.google.dev/gemini-api/docs), which has a free tier. **`ENABLE_RECEIPT_EXTRACT` is satisfied by either key**, so an instance that only scans receipts needs no OpenAI account at all.
+
+To set it up:
+
+- Enable expense documents, as for any receipt scanning (see above) — the image still has to be stored somewhere.
+- Create a key at [Google AI Studio](https://aistudio.google.com/apikey). The free tier is rate-limited but needs no card; a paid key is the same variable.
+- Set the two variables, and no OpenAI ones:
 
 ```.env
+ENABLE_EXPENSE_DOCUMENTS=true
 ENABLE_RECEIPT_EXTRACT=true
 GEMINI_API_KEY=XXXXXXXXXXXXXXXXXXXXXXXXXXXX
 ```
 
-`GEMINI_API_KEY` takes precedence over `OPENAI_API_KEY` for receipts, so only set it if that is what you want. The model defaults to `gemini-3.1-flash-lite` and can be changed with the optional `GEMINI_MODEL_RECEIPT_EXTRACT` variable. Unlike OpenAI, Gemini does not fetch the receipt image itself, so the app downloads it from your S3 storage and sends it inline; images over 10 MB are refused.
+- Optionally pick a different model with `GEMINI_MODEL_RECEIPT_EXTRACT`. It defaults to `gemini-3.1-flash-lite`; any vision-capable Gemini model works, and a larger one reads poor-quality photos more reliably.
 
-The _Deduce category from title_ feature below always uses OpenAI.
+Things worth knowing:
+
+- **`GEMINI_API_KEY` wins.** If both keys are set, receipts go to Gemini and the OpenAI key is only used for _Deduce category from title_, which has no Gemini path. Set `GEMINI_API_KEY` only if that is what you want.
+- **The app downloads the image.** Unlike OpenAI, Gemini does not fetch the receipt URL itself, so the server pulls it from your S3 storage and sends it inline. Images over 10 MB are refused.
+- **`OPENAI_BASE_URL` does not apply.** It configures the OpenAI client only; the Gemini path always talks to `generativelanguage.googleapis.com`.
+- **Schema rejection is handled.** If the model rejects the JSON schema with a 400, the request is retried once without it, since the prompt alone still names every field.
 
 ### Expense items
 
@@ -291,7 +305,7 @@ The model defaults to `gpt-5-nano` and can be changed with the optional `OPENAI_
 
 ### Using another OpenAI-compatible provider
 
-Both AI features above talk to the official OpenAI API by default. Set the optional `OPENAI_BASE_URL` variable to point them at a self-hosted or alternative provider instead:
+Both AI features above talk to the official OpenAI API by default — except receipt reading when `GEMINI_API_KEY` is set, which bypasses the OpenAI client entirely and ignores everything in this section. Set the optional `OPENAI_BASE_URL` variable to point them at a self-hosted or alternative provider instead:
 
 ```.env
 OPENAI_BASE_URL=http://localhost:11434/v1
@@ -301,7 +315,7 @@ OPENAI_MODEL_CATEGORY_EXTRACT=name-of-a-text-model
 
 Whichever provider you choose has to support the `json_schema` response format ([structured outputs](https://platform.openai.com/docs/guides/structured-outputs)), and the receipt feature additionally needs image input. If a response does not match the expected schema, the app reports that nothing could be extracted rather than filling the form with guesses.
 
-If your environment file was created on Windows, make sure it uses **LF line endings**. A trailing carriage return makes `OPENAI_API_KEY` fail authentication and silently switches feature flags off.
+If your environment file was created on Windows, make sure it uses **LF line endings**. A trailing carriage return makes `OPENAI_API_KEY` or `GEMINI_API_KEY` fail authentication and silently switches feature flags off.
 
 ### Analytics
 
