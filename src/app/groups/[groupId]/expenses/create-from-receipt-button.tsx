@@ -41,6 +41,7 @@ import Image from 'next/image'
 import { useRouter } from 'next/navigation'
 import { PropsWithChildren, ReactNode, useState } from 'react'
 import { useCurrentGroup } from '../current-group-context'
+import { stashReceiptItems } from './receipt-items'
 
 const MAX_FILE_SIZE = 5 * 1024 ** 2
 
@@ -118,10 +119,19 @@ function ReceiptDialogContent() {
         console.log('Uploading image…')
         let { url } = await uploadToS3(file)
         console.log('Extracting information from receipt…')
-        const { amount, categoryId, date, title } =
+        const { amount, categoryId, date, title, items } =
           await extractExpenseInformationFromImage(url)
         const { width, height } = await getImageData(file)
-        setReceiptInfo({ amount, categoryId, date, title, url, width, height })
+        setReceiptInfo({
+          amount,
+          categoryId,
+          date,
+          title,
+          items,
+          url,
+          width,
+          height,
+        })
       } catch (err) {
         console.error(err)
         toast({
@@ -228,6 +238,14 @@ function ReceiptDialogContent() {
             </div>
           </div>
           <div>
+            <strong>{t('Dialog.itemsLabel')}</strong>
+            <div>
+              {receiptInfo
+                ? t('itemCount', { count: receiptInfo.items.length })
+                : '…'}
+            </div>
+          </div>
+          <div>
             <strong>{t('Dialog.dateLabel')}</strong>
             <div>
               {receiptInfo ? (
@@ -257,6 +275,8 @@ function ReceiptDialogContent() {
               { event: 'expense: create from receipt', props: {} },
               `/groups/${groupId}/expenses`,
             )
+            // Too many to carry in the query string; the form picks them up.
+            stashReceiptItems(receiptInfo.items)
             router.push(
               `/groups/${group.id}/expenses/create?amount=${
                 receiptInfo.amount

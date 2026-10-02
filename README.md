@@ -242,12 +242,12 @@ S3_UPLOAD_ENDPOINT=http://localhost:9000
 
 ### Create expense from receipt
 
-You can offer users to create expense by uploading a receipt. This feature relies on a [vision-capable OpenAI model](https://platform.openai.com/docs/guides/vision) and a public S3 storage endpoint.
+You can offer users to create expense by uploading a receipt. The scan reads the total, the date, a title, a category and the receipt's individual line items, which are filled into the new expense (see _Expense items_ below). It relies on a vision-capable model and a public S3 storage endpoint.
 
 To enable the feature:
 
 - You must enable expense documents feature as well (see section above). That might change in the future, but for now we need to store images to make receipt scanning work.
-- Subscribe to OpenAI API and get access to a vision-capable model (you might need to buy credits in advance).
+- Get an API key for a vision-capable model, either from [OpenAI](https://platform.openai.com/docs/guides/vision) or from [Google AI Studio](https://aistudio.google.com/apikey) (you might need to buy credits in advance).
 - Update your environment variables with appropriate values:
 
 ```.env
@@ -256,6 +256,27 @@ OPENAI_API_KEY=XXXXXXXXXXXXXXXXXXXXXXXXXXXX
 ```
 
 The model defaults to `gpt-5-nano` and can be changed with the optional `OPENAI_MODEL_RECEIPT_EXTRACT` variable — a larger model reads poor-quality photos more reliably, at a higher price per scan.
+
+#### Reading receipts with Gemini instead
+
+Receipts can also be read by Google's [Gemini API](https://ai.google.dev/gemini-api/docs), which has a free tier. Set a key for it and receipts go to Gemini; everything else is unchanged:
+
+```.env
+ENABLE_RECEIPT_EXTRACT=true
+GEMINI_API_KEY=XXXXXXXXXXXXXXXXXXXXXXXXXXXX
+```
+
+`GEMINI_API_KEY` takes precedence over `OPENAI_API_KEY` for receipts, so only set it if that is what you want. The model defaults to `gemini-3.1-flash-lite` and can be changed with the optional `GEMINI_MODEL_RECEIPT_EXTRACT` variable. Unlike OpenAI, Gemini does not fetch the receipt image itself, so the app downloads it from your S3 storage and sends it inline; images over 10 MB are refused.
+
+The _Deduce category from title_ feature below always uses OpenAI.
+
+### Expense items
+
+Every expense can list the items it was made up of — what each line was, what it cost, and which participants share it. Items are optional and need no configuration: an expense without them behaves exactly as before.
+
+Ticking **Split by items** turns those assignments into the expense's split: each item's price goes to the participants who share it, and anything the items do not account for — tax, a tip, a discount, a line nobody claimed — is shared evenly between them. The shares always add up to the expense amount to the minor unit, and they are saved as an ordinary _by amount_ split, so balances, totals and the CSV export need to know nothing about items.
+
+Receipt scanning fills the items in automatically when the feature above is enabled.
 
 ### Deduce category from title
 

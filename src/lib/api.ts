@@ -47,6 +47,7 @@ export async function createExpense(
   for (const participant of [
     expenseFormValues.paidBy,
     ...expenseFormValues.paidFor.map((p) => p.participant),
+    ...expenseFormValues.items.flatMap((item) => item.participants),
   ]) {
     if (!group.participants.some((p) => p.id === participant))
       throw new Error(`Invalid participant ID: ${participant}`)
@@ -106,9 +107,25 @@ export async function createExpense(
           })),
         },
       },
+      // `create` rather than `createMany`: each item carries its own
+      // participants, which a nested createMany cannot connect.
+      items: { create: expenseItemsPayload(expenseFormValues) },
       notes: expenseFormValues.notes,
     },
   })
+}
+
+/** The nested-write payload for an expense's items, in the order entered. */
+function expenseItemsPayload(expenseFormValues: ExpenseFormValues) {
+  return expenseFormValues.items.map((item, position) => ({
+    id: randomId(),
+    title: item.title,
+    amount: item.amount,
+    position,
+    participants: {
+      connect: item.participants.map((id) => ({ id })),
+    },
+  }))
 }
 
 export async function deleteExpense(
@@ -178,6 +195,7 @@ export async function updateExpense(
   for (const participant of [
     expenseFormValues.paidBy,
     ...expenseFormValues.paidFor.map((p) => p.participant),
+    ...expenseFormValues.items.flatMap((item) => item.participants),
   ]) {
     if (!group.participants.some((p) => p.id === participant))
       throw new Error(`Invalid participant ID: ${participant}`)
@@ -290,6 +308,12 @@ export async function updateExpense(
           .map((doc) => ({
             id: doc.id,
           })),
+      },
+      // Items are rewritten wholesale: nothing else references them, and
+      // matching them up one by one would only be a slower way to get here.
+      items: {
+        deleteMany: {},
+        create: expenseItemsPayload(expenseFormValues),
       },
       notes: expenseFormValues.notes,
     },
@@ -432,6 +456,10 @@ export async function getExpense(groupId: string, expenseId: string) {
       paidFor: true,
       category: true,
       documents: true,
+      items: {
+        include: { participants: { select: { id: true } } },
+        orderBy: { position: 'asc' },
+      },
       recurringExpenseLink: true,
     },
   })
@@ -510,6 +538,10 @@ async function createRecurringExpenses() {
             paidFor: true,
             category: true,
             documents: true,
+            items: {
+              include: { participants: { select: { id: true } } },
+              orderBy: { position: 'asc' },
+            },
           },
         },
       },
@@ -535,6 +567,7 @@ async function createRecurringExpenses() {
         paidBy,
         paidFor,
         documents,
+        items,
         ...destructeredCurrentExpenseRecord
       } = currentExpenseRecord
 
@@ -562,6 +595,19 @@ async function createRecurringExpenses() {
                   }),
                 ),
               },
+              // Items belong to one expense, so a new frame gets its own copies
+              // rather than connecting to the previous frame's.
+              items: {
+                create: items.map((item) => ({
+                  id: randomId(),
+                  title: item.title,
+                  amount: item.amount,
+                  position: item.position,
+                  participants: {
+                    connect: item.participants.map(({ id }) => ({ id })),
+                  },
+                })),
+              },
               id: newExpenseId,
               expenseDate: newExpenseDate,
               recurringExpenseLink: {
@@ -578,6 +624,10 @@ async function createRecurringExpenses() {
               documents: true,
               category: true,
               paidBy: true,
+              items: {
+                include: { participants: { select: { id: true } } },
+                orderBy: { position: 'asc' },
+              },
             },
           })
 

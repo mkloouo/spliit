@@ -259,6 +259,23 @@
     "notesField": {
       "label": "Notes"
     },
+    "ItemsField": {
+      "title": "Items",
+      "description": "What the expense was made up of, and who shares each line. Optional.",
+      "empty": "No items yet.",
+      "add": "Add item",
+      "remove": "Remove item",
+      "titlePlaceholder": "Item",
+      "forWhom": "Shared by",
+      "nobody": "Nobody",
+      "everyone": "Everyone",
+      "selectAll": "Select all",
+      "selectNone": "Select none",
+      "total": "Items total:",
+      "useAsAmount": "Use as the expense amount",
+      "splitByItems": "Split by items",
+      "splitByItemsDescription": "Each item is split between the participants who share it. Anything the items do not account for — tax, a tip, a discount — is shared between them."
+    },
     "selectNone": "Select none",
     "selectAll": "Select all",
     "shares": "share(s)",
@@ -308,6 +325,7 @@
       "categoryLabel": "Category:",
       "amountLabel": "Amount:",
       "dateLabel": "Date:",
+      "itemsLabel": "Items:",
       "editNext": "You’ll be able to edit the expense information next.",
       "continue": "Continue"
     },
@@ -320,7 +338,8 @@
       "title": "Error while uploading document",
       "description": "Something wrong happened when uploading the document. Please retry later or select a different file.",
       "retry": "Retry"
-    }
+    },
+    "itemCount": "{count, plural, =0 {No items found} one {# item} other {# items}}"
   },
   "Balances": {
     "title": "Balances",

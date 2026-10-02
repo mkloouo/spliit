@@ -148,6 +148,27 @@ export const expenseFormSchema = z
       )
       .max(100)
       .default([]),
+    // What the expense was made up of. Optional: an expense without items
+    // behaves exactly as it did before they existed. The items are a record of
+    // the bill; the split that balances are computed from stays in `paidFor`,
+    // which the form derives from the items when asked to.
+    items: z
+      .array(
+        z.object({
+          id: z.string().max(64),
+          // No minimum: a row left blank is dropped on submit rather than
+          // blocking a form whose error would show up nowhere.
+          title: z.string().max(200, 'max200'),
+          amount: inputCoercedToNumber.refine(
+            (amount) => Math.abs(amount) <= 10_000_000_00,
+            'amountTenMillion',
+          ),
+          /** Who shares this item. Empty means it is nobody's in particular. */
+          participants: z.array(z.string().max(64)).max(100).default([]),
+        }),
+      )
+      .max(200)
+      .default([]),
     notes: z.string().max(EXPENSE_NOTES_MAX, 'max5000').optional(),
     recurrenceRule: z.enum(RecurrenceRule).default('NONE'),
   })

@@ -32,6 +32,7 @@ model Participant {
   groupId         String
   expensesPaidBy  Expense[]
   expensesPaidFor ExpensePaidFor[]
+  expenseItems    ExpenseItem[]
 }
 
 model Category {
@@ -60,11 +61,31 @@ model Expense {
   splitMode        SplitMode         @default(EVENLY)
   createdAt        DateTime          @default(now())
   documents        ExpenseDocument[]
+  items            ExpenseItem[]
   notes            String?
 
   recurrenceRule         RecurrenceRule?       @default(NONE)
   recurringExpenseLink   RecurringExpenseLink?
   recurringExpenseLinkId String?
+}
+
+/// A single line of an itemised expense: what it was, what it cost and who it
+/// was for. Items are a record of how the expense was made up; the split that
+/// balances are computed from stays in `ExpensePaidFor`, which the form derives
+/// from the items when asked to.
+model ExpenseItem {
+  id           String        @id
+  expense      Expense       @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  expenseId    String
+  title        String
+  /// In minor units, like `Expense.amount`.
+  amount       Int
+  /// The order the items were entered in, so they read back as the receipt did.
+  position     Int
+  /// Who shares this item. Empty means nobody was assigned it yet.
+  participants Participant[]
+
+  @@index([expenseId])
 }
 
 model ExpenseDocument {

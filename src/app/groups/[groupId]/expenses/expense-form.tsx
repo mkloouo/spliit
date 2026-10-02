@@ -44,6 +44,7 @@ import {
 } from '@/lib/currency-conversion'
 import { RuntimeFeatureFlags } from '@/lib/featureFlags'
 import { useActiveUser, useCurrencyRate } from '@/lib/hooks'
+import { itemisedShares } from '@/lib/items'
 import { randomId } from '@/lib/random'
 import {
   EXPENSE_NOTES_MAX,
@@ -74,6 +75,8 @@ import { match } from 'ts-pattern'
 import { DeletePopup } from '../../../../components/delete-popup'
 import { extractCategoryFromTitle } from '../../../../components/expense-form-actions'
 import { Textarea } from '../../../../components/ui/textarea'
+import { ExpenseItemsInput } from './expense-items-input'
+import { takeReceiptItems } from './receipt-items'
 
 /**
  * Keeps only what can be part of a number in the typed value. Given a
@@ -213,6 +216,9 @@ export function ExpenseForm({
   }
   const defaultSplittingOptions = getDefaultSplittingOptions(group)
   const groupCurrency = getCurrencyFromGroup(group)
+  // Read once per mount, and removed as it is read: the items a receipt scan
+  // left behind for this form (see `receipt-items.ts`).
+  const [receiptItems] = useState(takeReceiptItems)
   const form = useForm<ExpenseFormInput, any, ExpenseFormValues>({
     resolver: zodResolver(expenseFormSchema),
     defaultValues: expense
@@ -246,6 +252,12 @@ export function ExpenseForm({
           saveDefaultSplittingOptions: false,
           isReimbursement: expense.isReimbursement,
           documents: expense.documents,
+          items: expense.items.map((item) => ({
+            id: item.id,
+            title: item.title,
+            amount: formatAmountAsDecimal(item.amount, groupCurrency),
+            participants: item.participants.map(({ id }) => id),
+          })),
           notes: expense.notes ?? '',
           recurrenceRule: expense.recurrenceRule ?? undefined,
         }
@@ -276,6 +288,7 @@ export function ExpenseForm({
             splitMode: defaultSplittingOptions.splitMode,
             saveDefaultSplittingOptions: false,
             documents: [],
+            items: [],
             notes: '',
             recurrenceRule: RecurrenceRule.NONE,
           }
@@ -307,6 +320,12 @@ export function ExpenseForm({
                   },
                 ]
               : [],
+            items: receiptItems.map((item) => ({
+              id: randomId(),
+              title: item.title,
+              amount: item.amount.toFixed(groupCurrency.decimal_digits),
+              participants: [],
+            })),
             notes: '',
             recurrenceRule: RecurrenceRule.NONE,
           },
@@ -332,6 +351,14 @@ export function ExpenseForm({
           ? amountAsMinorUnits(shares, groupCurrency)
           : shares,
     }))
+    // A row the user added and left blank is not an item.
+    values.items = values.items
+      .filter((item) => item.title.trim() !== '')
+      .map((item) => ({
+        ...item,
+        title: item.title.trim(),
+        amount: amountAsMinorUnits(item.amount, groupCurrency),
+      }))
 
     // Currency should be blank if same as group currency, or if no conversion took place
     if (conversionRequired && values.originalAmount !== undefined) {
@@ -350,6 +377,12 @@ export function ExpenseForm({
   }
 
   const [isIncome, setIsIncome] = useState(Number(form.getValues().amount) < 0)
+  // Whether the items own the split. Not persisted: an itemised expense is
+  // already saved with the shares the items produced, so re-deriving them on
+  // open is a no-op until the items change.
+  const [splitByItems, setSplitByItems] = useState(
+    () => (expense?.items.length ?? 0) > 0 || receiptItems.length > 0,
+  )
   // How the user last touched each participant's share. An 'edited' amount is
   // kept as typed; every other participant takes an equal part of what is
   // left. A 'cleared' participant (the input was emptied) is one of those, but
@@ -410,6 +443,10 @@ export function ExpenseForm({
   useEffect(() => {
     const splitMode = form.getValues().splitMode
 
+    // While the items own the split, spreading the remainder evenly here would
+    // undo what they derived.
+    if (splitByItems) return
+
     // Only auto-balance for split mode 'Unevenly - By amount'
     if (
       splitMode === 'BY_AMOUNT' &&
@@ -464,6 +501,44 @@ export function ExpenseForm({
       form.setValue('paidFor', newPaidFor, { shouldValidate: true })
     }
   }, [shareEdits, form.watch('amount'), form.watch('splitMode')])
+
+  // The items drive the split: each item's price goes to the participants who
+  // share it, and anything the items do not account for is shared between them.
+  const items = form.watch('items') ?? []
+  useEffect(() => {
+    if (!splitByItems) return
+    const shares = itemisedShares(
+      amountAsMinorUnits(Number(form.getValues('amount')) || 0, groupCurrency),
+      items.map((item) => ({
+        amount: amountAsMinorUnits(Number(item.amount) || 0, groupCurrency),
+        participants: item.participants ?? [],
+      })),
+    )
+    // No item has been assigned to anyone yet: leave the split as it is rather
+    // than emptying it.
+    if (!shares) return
+    const options = {
+      shouldDirty: true,
+      shouldTouch: true,
+      shouldValidate: true,
+    }
+    form.setValue('splitMode', 'BY_AMOUNT', options)
+    form.setValue(
+      'paidFor',
+      [...shares].map(([participant, amount]) => ({
+        participant,
+        shares: formatAmountAsDecimal(amount, groupCurrency),
+      })),
+      options,
+    )
+  }, [splitByItems, JSON.stringify(items), form.watch('amount')])
+
+  /** The items' prices added up, in minor units. */
+  const itemsTotal = items.reduce(
+    (sum, item) =>
+      sum + amountAsMinorUnits(Number(item.amount) || 0, groupCurrency),
+    0,
+  )
 
   const [usingCustomConversionRate, setUsingCustomConversionRate] = useState(
     !!form.formState.defaultValues?.conversionRate,
@@ -1041,6 +1116,91 @@ export function ExpenseForm({
 
         <Card className="mt-4">
           <CardHeader>
+            <CardTitle>{t('ItemsField.title')}</CardTitle>
+            <CardDescription>{t('ItemsField.description')}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <FormField
+              control={form.control}
+              name="items"
+              render={({ field }) => (
+                <FormItem className="space-y-0">
+                  <ExpenseItemsInput
+                    items={field.value ?? []}
+                    updateItems={field.onChange}
+                    participants={group.participants}
+                    currency={groupCurrency}
+                    enforceCurrencyPattern={(value) =>
+                      enforceCurrencyPattern(value, groupCurrency)
+                    }
+                    newItemId={randomId}
+                  />
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            {items.length > 0 && (
+              <div className="mt-4 space-y-3">
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="text-muted-foreground">
+                    {t('ItemsField.total')}
+                  </span>
+                  <span>
+                    {formatCurrency(groupCurrency, itemsTotal, locale)}
+                  </span>
+                  {itemsTotal !==
+                    amountAsMinorUnits(
+                      Number(form.watch('amount')) || 0,
+                      groupCurrency,
+                    ) && (
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0"
+                      onClick={() =>
+                        form.setValue(
+                          'amount',
+                          Number(
+                            formatAmountAsDecimal(itemsTotal, groupCurrency),
+                          ),
+                          {
+                            shouldDirty: true,
+                            shouldTouch: true,
+                            shouldValidate: true,
+                          },
+                        )
+                      }
+                    >
+                      {t('ItemsField.useAsAmount')}
+                    </Button>
+                  )}
+                </div>
+                {/* Local state, not a form field: the derived shares are
+                    what gets saved, so there is nothing to persist. */}
+                <label className="flex flex-row gap-2 items-start cursor-pointer">
+                  <Checkbox
+                    className="mt-0.5"
+                    checked={splitByItems}
+                    onCheckedChange={(checked) =>
+                      setSplitByItems(checked === true)
+                    }
+                  />
+                  <div>
+                    <div className="text-sm font-medium leading-none">
+                      {t('ItemsField.splitByItems')}
+                    </div>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {t('ItemsField.splitByItemsDescription')}
+                    </p>
+                  </div>
+                </label>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="mt-4">
+          <CardHeader>
             <CardTitle className="flex justify-between">
               <span>{t(`${sExpense}.paidFor.title`)}</span>
               <Button
@@ -1228,7 +1388,9 @@ export function ExpenseForm({
                                             className="text-base w-[80px] -my-2"
                                             type="text"
                                             inputMode="decimal"
-                                            disabled={!isSelected}
+                                            disabled={
+                                              !isSelected || splitByItems
+                                            }
                                             value={
                                               cleared
                                                 ? ''
@@ -1309,7 +1471,7 @@ export function ExpenseForm({
                                           key={String(!isSelected)}
                                           className="text-base w-[80px] -my-2"
                                           type="text"
-                                          disabled={!isSelected}
+                                          disabled={!isSelected || splitByItems}
                                           value={cleared ? '' : row?.shares}
                                           placeholder={
                                             cleared

@@ -3,20 +3,115 @@
 import { getCategories } from '@/lib/api'
 import { env } from '@/lib/env'
 import { getRuntimeFeatureFlags } from '@/lib/featureFlags'
+import { fetchImageAsInlineData, generateJsonFromImage } from '@/lib/gemini'
 import { getOpenAIClient } from '@/lib/openai'
 import { isAllowedUploadUrl } from '@/lib/uploaded-image-url'
 import { formatCategoryForAIPrompt } from '@/lib/utils'
 import { z } from 'zod'
 
-// The model is contractually bound to this shape by `strict: true` below, but
-// the response is still parsed rather than trusted: a self-hosted or older
-// endpoint may ignore the schema.
+/** How many line items we are willing to read off a single receipt. */
+const MAX_ITEMS = 100
+
+// The model is contractually bound to this shape by `strict: true` (OpenAI) or
+// `responseJsonSchema` (Gemini), but the response is still parsed rather than
+// trusted: a self-hosted or older endpoint may ignore the schema.
 const receiptResponseSchema = z.object({
   amount: z.number(),
   categoryId: z.string(),
   date: z.string(),
   title: z.string(),
+  items: z
+    .array(z.object({ title: z.string(), amount: z.number() }))
+    .default([]),
 })
+
+/**
+ * The shape both providers are asked to answer in. Every property is required
+ * and no others are allowed, which is what OpenAI's `strict: true` demands;
+ * Gemini accepts the same document.
+ */
+const responseJsonSchema = {
+  type: 'object',
+  properties: {
+    amount: { type: 'number' },
+    categoryId: { type: 'string' },
+    date: { type: 'string' },
+    title: { type: 'string' },
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          amount: { type: 'number' },
+        },
+        required: ['title', 'amount'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['amount', 'categoryId', 'date', 'title', 'items'],
+  additionalProperties: false,
+} as const
+
+function receiptPrompt(
+  categories: { id: number; grouping: string; name: string }[],
+) {
+  return `
+This image contains a receipt.
+Read the total amount and store it as a non-formatted number without any other text or currency.
+Then guess the category for this receipt among the following categories and store its ID: ${categories.map(
+    (category) => formatCategoryForAIPrompt(category),
+  )}.
+Guess the expense’s date and store it as yyyy-mm-dd.
+Guess a title for the expense.
+Read every purchased line item into \`items\`, in the order they are printed:
+- \`title\`: the product name as written on the receipt.
+- \`amount\`: the price printed for that line, as a non-formatted number. For a
+  line with a quantity, this is the line total, not the unit price.
+Do not invent items, prices or dates that cannot be read from the image, and do
+not reconstruct a price the receipt does not print. Return an empty \`items\`
+list if no line items are legible. The items do not have to add up to the
+total — a receipt may also carry tax, tips or discounts.`
+}
+
+async function extractWithGemini(imageUrl: string, prompt: string) {
+  const image = await fetchImageAsInlineData(imageUrl)
+  return generateJsonFromImage({
+    prompt,
+    schema: responseJsonSchema,
+    image,
+  })
+}
+
+async function extractWithOpenAI(imageUrl: string, prompt: string) {
+  const openai = getOpenAIClient()
+  const completion = await openai.chat.completions.create({
+    model: env.OPENAI_MODEL_RECEIPT_EXTRACT,
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'receipt_response',
+        strict: true,
+        schema: responseJsonSchema,
+      },
+    },
+    messages: [
+      { role: 'user', content: [{ type: 'text', text: prompt }] },
+      {
+        role: 'user',
+        content: [{ type: 'image_url', image_url: { url: imageUrl } }],
+      },
+    ],
+  })
+  const messageContent = completion.choices.at(0)?.message.content
+  if (!messageContent) return null
+  try {
+    return JSON.parse(messageContent)
+  } catch {
+    return null
+  }
+}
 
 export async function extractExpenseInformationFromImage(imageUrl: string) {
   'use server'
@@ -36,57 +131,16 @@ export async function extractExpenseInformationFromImage(imageUrl: string) {
   }
 
   const categories = await getCategories()
-  const openai = getOpenAIClient()
+  const prompt = receiptPrompt(categories)
 
-  const completion = await openai.chat.completions.create({
-    model: env.OPENAI_MODEL_RECEIPT_EXTRACT,
-    response_format: {
-      type: 'json_schema',
-      json_schema: {
-        name: 'receipt_response',
-        strict: true,
-        schema: {
-          type: 'object',
-          properties: {
-            amount: { type: 'number' },
-            categoryId: { type: 'string' },
-            date: { type: 'string' },
-            title: { type: 'string' },
-          },
-          required: ['amount', 'categoryId', 'date', 'title'],
-          additionalProperties: false,
-        },
-      },
-    },
-    messages: [
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: `
-              This image contains a receipt.
-              Read the total amount and store it as a non-formatted number without any other text or currency.
-              Then guess the category for this receipt among the following categories and store its ID: ${categories.map(
-                (category) => formatCategoryForAIPrompt(category),
-              )}.
-              Guess the expense’s date and store it as yyyy-mm-dd.
-              Guess a title for the expense.`,
-          },
-        ],
-      },
-      {
-        role: 'user',
-        content: [{ type: 'image_url', image_url: { url: imageUrl } }],
-      },
-    ],
-  })
+  // Gemini when a key for it is configured, OpenAI otherwise.
+  const raw = env.GEMINI_API_KEY
+    ? await extractWithGemini(imageUrl, prompt)
+    : await extractWithOpenAI(imageUrl, prompt)
 
-  const messageContent = completion.choices.at(0)?.message.content
   const parsed = (() => {
-    if (!messageContent) return null
     try {
-      return receiptResponseSchema.parse(JSON.parse(messageContent))
+      return receiptResponseSchema.parse(raw)
     } catch {
       // Malformed or schema-violating output: report "nothing extracted"
       // rather than passing junk on to the expense form.
@@ -100,6 +154,12 @@ export async function extractExpenseInformationFromImage(imageUrl: string) {
     categoryId: parsed?.categoryId ?? null,
     date: parsed?.date ?? null,
     title: parsed?.title ?? null,
+    items: (parsed?.items ?? [])
+      .filter(
+        (item) => item.title.trim() !== '' && Number.isFinite(item.amount),
+      )
+      .slice(0, MAX_ITEMS)
+      .map((item) => ({ title: item.title.trim(), amount: item.amount })),
   }
 }
 

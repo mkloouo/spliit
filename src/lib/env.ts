@@ -115,6 +115,14 @@ const envSchema = z
       interpretBlankEnvVarAsUndefined,
       z.string().trim().default('gpt-5-nano'),
     ),
+    // Google's Gemini API, an alternative reader for the receipt feature. When
+    // this key is set, receipts go to Gemini instead of OpenAI; the category
+    // feature always uses OpenAI. .trim() for the same reason as above.
+    GEMINI_API_KEY: z.string().trim().optional(),
+    GEMINI_MODEL_RECEIPT_EXTRACT: z.preprocess(
+      interpretBlankEnvVarAsUndefined,
+      z.string().trim().default('gemini-3.1-flash-lite'),
+    ),
     // Analytics is disabled unless a provider is selected. Several can be
     // listed, comma-separated, to report to all of them at once. These are read
     // on the server and passed to the client as props, so they are deliberately
@@ -180,14 +188,19 @@ const envSchema = z
           'If ENABLE_EXPENSE_DOCUMENTS is set, then S3_* must be set too',
       })
     }
-    if (
-      (enableReceiptExtract || enableCategoryExtract) &&
-      !env.OPENAI_API_KEY
-    ) {
+    // The receipt reader accepts either key; the category reader is OpenAI only.
+    if (enableReceiptExtract && !env.OPENAI_API_KEY && !env.GEMINI_API_KEY) {
       ctx.addIssue({
         code: ZodIssueCode.custom,
         message:
-          'If ENABLE_RECEIPT_EXTRACT or ENABLE_CATEGORY_EXTRACT is set, then OPENAI_API_KEY must be set too',
+          'If ENABLE_RECEIPT_EXTRACT is set, then OPENAI_API_KEY or GEMINI_API_KEY must be set too',
+      })
+    }
+    if (enableCategoryExtract && !env.OPENAI_API_KEY) {
+      ctx.addIssue({
+        code: ZodIssueCode.custom,
+        message:
+          'If ENABLE_CATEGORY_EXTRACT is set, then OPENAI_API_KEY must be set too',
       })
     }
     if (env.ANALYTICS_PROVIDER.includes('plausible') && !env.PLAUSIBLE_DOMAIN) {

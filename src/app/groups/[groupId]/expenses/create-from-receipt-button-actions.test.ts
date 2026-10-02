@@ -1,8 +1,16 @@
+import { env } from '../../../../lib/env'
 import { extractExpenseInformationFromImage } from './create-from-receipt-button-actions'
 
-// See the note in src/components/expense-form-actions.test.ts on why this is a
-// `var` reached through an arrow.
+// See the note in src/components/expense-form-actions.test.ts on why these are
+// `var`s reached through an arrow.
 var mockCreate = jest.fn()
+var mockGenerate = jest.fn()
+var mockFetchImage = jest.fn()
+
+jest.mock('../../../../lib/gemini', () => ({
+  fetchImageAsInlineData: (...args: unknown[]) => mockFetchImage(...args),
+  generateJsonFromImage: (...args: unknown[]) => mockGenerate(...args),
+}))
 
 jest.mock('openai', () => ({
   __esModule: true,
@@ -17,6 +25,8 @@ jest.mock('../../../../lib/env', () => ({
     OPENAI_API_KEY: 'sk-test',
     OPENAI_BASE_URL: undefined,
     OPENAI_MODEL_RECEIPT_EXTRACT: 'test-vision-model',
+    GEMINI_API_KEY: undefined as string | undefined,
+    GEMINI_MODEL_RECEIPT_EXTRACT: 'test-gemini-model',
   },
 }))
 jest.mock('../../../../lib/featureFlags', () => ({
@@ -43,6 +53,7 @@ const NOTHING_EXTRACTED = {
   categoryId: null,
   date: null,
   title: null,
+  items: [],
 }
 
 describe('extractExpenseInformationFromImage', () => {
@@ -55,6 +66,10 @@ describe('extractExpenseInformationFromImage', () => {
         categoryId: '4',
         date: '2026-03-01',
         title: 'Dinner',
+        items: [
+          { title: 'Pizza', amount: 30 },
+          { title: 'Beer', amount: 12.5 },
+        ],
       }),
     )
     expect(await extractExpenseInformationFromImage(IMAGE)).toEqual({
@@ -62,7 +77,42 @@ describe('extractExpenseInformationFromImage', () => {
       categoryId: '4',
       date: '2026-03-01',
       title: 'Dinner',
+      items: [
+        { title: 'Pizza', amount: 30 },
+        { title: 'Beer', amount: 12.5 },
+      ],
     })
+  })
+
+  it('reads a receipt with no legible line items', async () => {
+    respondWith(
+      JSON.stringify({
+        amount: 42.5,
+        categoryId: '4',
+        date: '2026-03-01',
+        title: 'Dinner',
+        items: [],
+      }),
+    )
+    expect((await extractExpenseInformationFromImage(IMAGE)).items).toEqual([])
+  })
+
+  it('drops items the model could not actually read', async () => {
+    respondWith(
+      JSON.stringify({
+        amount: 42.5,
+        categoryId: '4',
+        date: '2026-03-01',
+        title: 'Dinner',
+        items: [
+          { title: '  ', amount: 1 },
+          { title: ' Beer ', amount: 12.5 },
+        ],
+      }),
+    )
+    expect((await extractExpenseInformationFromImage(IMAGE)).items).toEqual([
+      { title: 'Beer', amount: 12.5 },
+    ])
   })
 
   it('keeps a title containing a comma intact', async () => {
@@ -129,5 +179,55 @@ describe('extractExpenseInformationFromImage', () => {
       extractExpenseInformationFromImage('https://evil.example/receipt.jpg'),
     ).rejects.toThrow('Invalid image URL.')
     expect(mockCreate).not.toHaveBeenCalled()
+  })
+})
+
+describe('extractExpenseInformationFromImage, with a Gemini key', () => {
+  const mockEnv = env as { GEMINI_API_KEY?: string }
+
+  beforeEach(() => {
+    mockCreate.mockReset()
+    mockGenerate.mockReset()
+    mockFetchImage.mockReset()
+    mockEnv.GEMINI_API_KEY = 'gem-test'
+    mockFetchImage.mockResolvedValue({ mime_type: 'image/jpeg', data: 'AAAA' })
+  })
+  afterEach(() => {
+    delete mockEnv.GEMINI_API_KEY
+  })
+
+  it('reads the receipt with Gemini instead of OpenAI', async () => {
+    mockGenerate.mockResolvedValue({
+      amount: 42.5,
+      categoryId: '4',
+      date: '2026-03-01',
+      title: 'Dinner',
+      items: [{ title: 'Beer', amount: 12.5 }],
+    })
+
+    expect(await extractExpenseInformationFromImage(IMAGE)).toEqual({
+      amount: 42.5,
+      categoryId: '4',
+      date: '2026-03-01',
+      title: 'Dinner',
+      items: [{ title: 'Beer', amount: 12.5 }],
+    })
+    // Gemini does not fetch the image itself, so the app inlines it.
+    expect(mockFetchImage).toHaveBeenCalledWith(IMAGE)
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
+
+  it('reports nothing extracted when Gemini answers off-schema', async () => {
+    mockGenerate.mockResolvedValue({ total: 42.5, store: 'Somewhere' })
+    expect(await extractExpenseInformationFromImage(IMAGE)).toEqual(
+      NOTHING_EXTRACTED,
+    )
+  })
+
+  it('refuses an image URL the app did not upload', async () => {
+    await expect(
+      extractExpenseInformationFromImage('https://evil.example/receipt.jpg'),
+    ).rejects.toThrow('Invalid image URL.')
+    expect(mockFetchImage).not.toHaveBeenCalled()
   })
 })

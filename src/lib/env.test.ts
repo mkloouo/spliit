@@ -63,3 +63,29 @@ describe('ANALYTICS_PROVIDER', () => {
     ).not.toThrow()
   })
 })
+
+describe('AI feature keys', () => {
+  it('lets the receipt reader run on either an OpenAI or a Gemini key', () => {
+    expect(() => loadEnv({ ENABLE_RECEIPT_EXTRACT: 'true' })).toThrow(
+      /OPENAI_API_KEY or GEMINI_API_KEY/,
+    )
+    expect(() =>
+      loadEnv({ ENABLE_RECEIPT_EXTRACT: 'true', OPENAI_API_KEY: 'sk-test' }),
+    ).not.toThrow()
+    expect(() =>
+      loadEnv({ ENABLE_RECEIPT_EXTRACT: 'true', GEMINI_API_KEY: 'gem-test' }),
+    ).not.toThrow()
+  })
+
+  it('still requires an OpenAI key for the category reader', () => {
+    expect(() =>
+      loadEnv({ ENABLE_CATEGORY_EXTRACT: 'true', GEMINI_API_KEY: 'gem-test' }),
+    ).toThrow(/OPENAI_API_KEY/)
+  })
+
+  it('trims the Gemini key and defaults its model', () => {
+    const env = loadEnv({ GEMINI_API_KEY: ' gem-test\r' })
+    expect(env.GEMINI_API_KEY).toBe('gem-test')
+    expect(env.GEMINI_MODEL_RECEIPT_EXTRACT).toBe('gemini-3.1-flash-lite')
+  })
+})
