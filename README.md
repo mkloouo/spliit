@@ -393,6 +393,134 @@ Providers live in `src/lib/analytics/providers/`. Copy `console.tsx`, then regis
 
 A provider supplies a transport — where events go — and optionally a `Script` component if it needs to load an SDK.
 
+## Maintaining this fork
+
+This repository is a fork of [spliit-app/spliit](https://github.com/spliit-app/spliit) that adds two things of its own: [expense items](#expense-items) and [reading receipts with Gemini](#reading-receipts-with-gemini-instead). Everything else is upstream, and the point of this section is to keep it that way — upstream stays pullable, and the fork's changes stay a small, reviewable diff on top.
+
+### Branch model
+
+`main` is a pure mirror of `upstream/main`. **Nothing is ever committed to it.** The fork's own commits live on one long-lived branch, `mkloouo-spliit-fork`, which is what releases are tagged from.
+
+One-time setup:
+
+```bash
+git remote add upstream https://github.com/spliit-app/spliit.git
+git fetch upstream
+```
+
+### Pulling from upstream
+
+```bash
+# 1. fast-forward the mirror
+git checkout main
+git pull upstream main
+git push origin main
+
+# 2. replay the fork's commits on top
+git checkout mkloouo-spliit-fork
+git rebase main
+# ...resolve conflicts, then...
+
+# 3. verify before pushing
+npm ci --ignore-scripts && npx prisma generate
+npm run check-types && npm test && npm run check-formatting
+
+git push --force-with-lease origin mkloouo-spliit-fork
+```
+
+`npm ci --ignore-scripts` is deliberate: the repo's `postinstall` runs `prisma migrate deploy`, which needs a reachable database. `npx prisma generate` then produces the client in `src/generated/prisma`, which `npm run check-types` needs.
+
+**Rebase rather than merge.** The fork's commits replay on top of upstream, so every conflict reads as "my hunk versus the new upstream version of that hunk" instead of a three-way tangle, and `git diff main...mkloouo-spliit-fork` is always exactly the fork's feature set and nothing else. The cost is rewritten history, which means an existing release tag keeps pointing at the commit it was cut from — correct behaviour for a release, so not really a cost.
+
+### Where conflicts land
+
+Upstream commits touching each file in the last twelve months, against what the fork changes in it:
+
+| File                           | Upstream commits | The fork's footprint                                                      |
+| ------------------------------ | ---------------- | ------------------------------------------------------------------------- |
+| `expense-form.tsx`             | 18               | three `defaultValues` blocks, two lines in `submit()`, one effect, one `<Card>`, two `disabled={}` |
+| `messages/en-US.json`          | 11               | `ExpenseForm.ItemsField`, two `CreateFromReceipt` keys                    |
+| `api.ts`, `env.ts`, `schemas.ts` | 5 each         | small and localized                                                       |
+| `prisma/schema.prisma`         | 2                | three additions                                                           |
+| `gemini.ts`, `items.ts`, `expense-items-input.tsx`, `receipt-items.ts`, the migration | — | new files, so they can never conflict |
+
+That distribution is deliberate, and worth preserving when adding to the fork:
+
+- **The logic lives in new files.** Deriving a split from items is `src/lib/items.ts`, with its own tests, rather than code inside the form. If upstream rewrites `expense-form.tsx` wholesale, you re-apply a handful of small hunks and never the algorithm.
+- **Nothing downstream of the split was touched.** "Split by items" saves an ordinary `BY_AMOUNT` split, so `balances.ts`, `totals.ts`, `shares.ts` and the CSV export — all files upstream does change — needed no modification at all.
+- **Translations cannot break.** `src/i18n/request.ts` deepmerges every locale over `en-US`, so upstream's constant Weblate updates are safe: a string the fork added simply renders in English until someone translates it.
+
+### One hazard: migration ordering
+
+The fork's migration is `prisma/migrations/20261002000000_add_expense_items`. If upstream later adds a migration dated *earlier* than that, a fresh database applies upstream's first while an existing one applied the fork's first. That is harmless here, because the fork's migration only creates new tables, but keep it in mind for anything less self-contained.
+
+**Do not rename that directory once it has been deployed.** Prisma records applied migrations by name in `_prisma_migrations`, and a rename reads as one migration having vanished and an unknown one having appeared.
+
+## Deploying this fork
+
+Pushing a tag runs [`.github/workflows/cd.yml`](.github/workflows/cd.yml), which builds `linux/amd64` and `linux/arm64` images and publishes them to `ghcr.io/mkloouo/spliit` under both the tag and `latest`.
+
+### With Docker compose
+
+The `compose.yaml` in this repository builds from source, which is what you want for development. On a server, run the published image instead:
+
+```yaml
+services:
+  app:
+    image: ghcr.io/mkloouo/spliit:v1.0.0 # pin the tag; `latest` moves under you
+    restart: unless-stopped
+    ports:
+      - 3000:3000
+    env_file:
+      - container.env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [spliit_network]
+
+  db:
+    image: postgres:latest
+    restart: unless-stopped
+    expose: [5432]
+    env_file:
+      - container.env
+    volumes:
+      - spliit-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks: [spliit_network]
+
+volumes:
+  spliit-db:
+
+networks:
+  spliit_network:
+    driver: bridge
+```
+
+Start from [`container.env.example`](./container.env.example), and add the fork's own variables for receipt scanning:
+
+```.env
+ENABLE_EXPENSE_DOCUMENTS=true # receipts need S3; set the S3_* variables too
+ENABLE_RECEIPT_EXTRACT=true
+GEMINI_API_KEY=XXXXXXXXXXXXXXXXXXXXXXXXXXXX
+```
+
+Expense items need no configuration or feature flag; only reading receipts does.
+
+Three things to know before the first deploy:
+
+- **The package is private by default.** Either run `docker login ghcr.io -u <your-github-username>` on the server with a personal access token scoped `read:packages`, or make the package public under GitHub → Packages → spliit → Package settings.
+- **Migrations run themselves.** [`scripts/container-entrypoint.sh`](./scripts/container-entrypoint.sh) runs `prisma migrate deploy` before starting the server, so the `ExpenseItem` tables are created on the first boot of a new image. There is no manual step — but back the database up first anyway, because it is a schema change.
+- **A named volume, not `./postgres-data`.** The volume in this repository's `compose.yaml` is a bind mount into the working copy, which is fine for throwaway local data and wrong for a server.
+
+### Building on the server instead
+
+If you would rather not involve the registry, clone the repository on the server and swap `image:` for `build: .`. That needs no tag and no login, at the cost of a few minutes and roughly a gigabyte of build space on every update.
+
 ## License
 
 MIT, see [LICENSE](./LICENSE).
