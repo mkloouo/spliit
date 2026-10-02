@@ -354,6 +354,14 @@ Ticking **Split by items** turns those assignments into the expense's split: eac
 
 Receipt scanning fills the items in automatically when the feature above is enabled.
 
+A receipt's own summary lines — a total of all discounts, a subtotal — are not
+purchases, and counting them as items subtracts the same discount twice. The
+scan is told to leave them out and to fold a per-line rebate into the line it
+discounts. When one slips through anyway, the form notices that the items no
+longer add up to the expense and offers to drop the single line that would
+square it, which is found by arithmetic rather than by matching words, so it
+works whatever language the receipt is printed in.
+
 ### Deduce category from title
 
 You can offer users to automatically deduce the expense category from the title. Since this feature relies on a OpenAI subscription, follow the signup instructions above and configure the following environment variables:
@@ -481,8 +489,16 @@ One-time setup:
 
 ```bash
 git remote add upstream https://github.com/spliit-app/spliit.git
+# Upstream's release tags are not this fork's. Without this every fetch drags
+# all of them in, and `git push --tags` would then publish an upstream build as
+# `:latest` — cd.yml re-points it on any tag push.
+git config remote.upstream.tagOpt --no-tags
 git fetch upstream
 ```
+
+The fork's own releases are tagged `v1.0.0`, `v1.0.1`, … — the `v` prefix keeps
+them apart from upstream's bare `1.x.y`. Push a tag by name, never with
+`--tags`.
 
 ### Pulling from upstream
 

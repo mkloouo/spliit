@@ -101,6 +101,10 @@ sync)
   git remote get-url upstream >/dev/null 2>&1 || {
     say "Adding the upstream remote ($UPSTREAM_URL)"
     git remote add upstream "$UPSTREAM_URL"
+    # --no-tags, or every fetch drags upstream's release tags in. They are not
+    # this fork's releases, and pushing them would publish an upstream build
+    # as `:latest` (cd.yml re-points it on any tag push).
+    git config remote.upstream.tagOpt --no-tags
   }
 
   say 'Fetching upstream'

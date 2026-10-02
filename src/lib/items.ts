@@ -44,3 +44,31 @@ export function itemisedShares(
 
   return owed
 }
+
+/**
+ * The one item whose removal would make the rest add up to `amount`, or null
+ * when no single item explains the difference.
+ *
+ * A receipt prints summary lines — a total of all discounts, a subtotal — that
+ * restate figures from the lines above them. Read as items, they are counted
+ * twice and the list no longer agrees with what was paid. The prompt asks the
+ * model to leave them out; this catches the ones that slip through, by
+ * arithmetic rather than by matching words, so it works whatever language the
+ * receipt is printed in.
+ *
+ * Everything is in minor units.
+ */
+export function findRedundantItem<T extends { amount: number }>(
+  amount: number,
+  items: T[],
+): T | null {
+  const total = items.reduce((sum, item) => sum + item.amount, 0)
+  if (total === amount) return null
+
+  // Every candidate necessarily holds the same amount — `total - amount` — so
+  // removing any one of them leaves the same, correct list. Which to name is
+  // the only choice, and the last is the better guess: a receipt prints a
+  // summary after the lines it summarises, as `Opusty łącznie` follows the
+  // per-line rebate it repeats.
+  return items.findLast((item) => total - item.amount === amount) ?? null
+}

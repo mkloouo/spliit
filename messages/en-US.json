@@ -283,6 +283,9 @@
       "selectNone": "Select none",
       "total": "Items total:",
       "useAsAmount": "Use as the expense amount",
+      "mismatch": "These items add up to {itemsTotal}, but the expense is {amount}.",
+      "redundantLine": "“{title}” would explain the difference exactly. Receipts print summaries — a total of all discounts, a subtotal — that repeat figures from the lines above them.",
+      "removeRedundantLine": "Remove “{title}”",
       "splitByItems": "Split by items",
       "splitByItemsDescription": "Each item is split between the participants who share it. Anything the items do not account for — tax, a tip, a discount — is shared between them."
     },

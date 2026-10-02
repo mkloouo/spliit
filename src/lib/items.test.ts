@@ -1,4 +1,4 @@
-import { itemisedShares } from './items'
+import { findRedundantItem, itemisedShares } from './items'
 
 const shares = (
   amount: number,
@@ -73,5 +73,48 @@ describe('itemisedShares', () => {
   it('has no split to derive when nothing was claimed', () => {
     expect(shares(1000, [])).toBeNull()
     expect(shares(1000, [{ amount: 1000, participants: [] }])).toBeNull()
+  })
+})
+
+describe('findRedundantItem', () => {
+  const items = [
+    { title: 'Pizza', amount: 1600 },
+    { title: 'Haribo', amount: 899 },
+    { title: 'Rabat Haribo', amount: -149 },
+  ]
+
+  it('finds the summary line that was counted twice', () => {
+    const withSummary = [...items, { title: 'Opusty łącznie', amount: -149 }]
+    // 16.00 + 8.99 - 1.49 = 23.50 was paid; the list adds up to 22.01.
+    expect(findRedundantItem(2350, withSummary)).toEqual({
+      title: 'Opusty łącznie',
+      amount: -149,
+    })
+  })
+
+  it('finds nothing when the items already add up', () => {
+    expect(findRedundantItem(2350, items)).toBeNull()
+  })
+
+  it('finds nothing when no single item explains the difference', () => {
+    expect(findRedundantItem(2000, items)).toBeNull()
+  })
+
+  it('names the last of several lines that would each square the total', () => {
+    // Any of them leaves the same remaining list, so the only question is which
+    // to name; a summary is printed after what it summarises.
+    const withSummary = [
+      ...items,
+      { title: 'Rabat Haribo', amount: -149 },
+      { title: 'Opusty łącznie', amount: -149 },
+    ]
+    expect(findRedundantItem(2201, withSummary)).toEqual({
+      title: 'Opusty łącznie',
+      amount: -149,
+    })
+  })
+
+  it('finds nothing in an empty list', () => {
+    expect(findRedundantItem(2350, [])).toBeNull()
   })
 })

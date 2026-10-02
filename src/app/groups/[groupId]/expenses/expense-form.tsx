@@ -44,7 +44,7 @@ import {
 } from '@/lib/currency-conversion'
 import { RuntimeFeatureFlags } from '@/lib/featureFlags'
 import { useActiveUser, useCurrencyRate } from '@/lib/hooks'
-import { itemisedShares } from '@/lib/items'
+import { findRedundantItem, itemisedShares } from '@/lib/items'
 import { randomId } from '@/lib/random'
 import {
   EXPENSE_NOTES_MAX,
@@ -65,7 +65,7 @@ import {
 } from '@/lib/utils'
 import { AppRouterOutput } from '@/trpc/routers/_app'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ChevronRight, Save } from 'lucide-react'
+import { ChevronRight, Save, TriangleAlert } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
@@ -539,6 +539,25 @@ export function ExpenseForm({
       sum + amountAsMinorUnits(Number(item.amount) || 0, groupCurrency),
     0,
   )
+
+  // The items are meant to add up to what was paid. When they do not, the
+  // usual cause is a receipt summary the scan read as a purchase — a total of
+  // all discounts, a subtotal — which double-counts a figure already in the
+  // list. `findRedundantItem` names the line that would square it, if one does.
+  const expenseAmount = amountAsMinorUnits(
+    Number(form.watch('amount')) || 0,
+    groupCurrency,
+  )
+  const itemsMismatch = items.length > 0 && itemsTotal !== expenseAmount
+  const redundantItem = itemsMismatch
+    ? findRedundantItem(
+        expenseAmount,
+        items.map((item) => ({
+          ...item,
+          amount: amountAsMinorUnits(Number(item.amount) || 0, groupCurrency),
+        })),
+      )
+    : null
 
   const [usingCustomConversionRate, setUsingCustomConversionRate] = useState(
     !!form.formState.defaultValues?.conversionRate,
@@ -1155,11 +1174,7 @@ export function ExpenseForm({
                   <span>
                     {formatCurrency(groupCurrency, itemsTotal, locale)}
                   </span>
-                  {itemsTotal !==
-                    amountAsMinorUnits(
-                      Number(form.watch('amount')) || 0,
-                      groupCurrency,
-                    ) && (
+                  {itemsMismatch && (
                     <Button
                       type="button"
                       variant="link"
@@ -1182,6 +1197,55 @@ export function ExpenseForm({
                     </Button>
                   )}
                 </div>
+
+                {redundantItem && (
+                  <div className="flex gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
+                    <TriangleAlert className="w-4 h-4 mt-0.5 shrink-0" />
+                    <div className="text-sm space-y-2">
+                      <p className="font-medium">
+                        {t('ItemsField.mismatch', {
+                          itemsTotal: formatCurrency(
+                            groupCurrency,
+                            itemsTotal,
+                            locale,
+                          ),
+                          amount: formatCurrency(
+                            groupCurrency,
+                            expenseAmount,
+                            locale,
+                          ),
+                        })}
+                      </p>
+                      <p>
+                        {t('ItemsField.redundantLine', {
+                          title: redundantItem.title,
+                        })}
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() =>
+                          form.setValue(
+                            'items',
+                            items.filter(
+                              (item) => item.id !== redundantItem.id,
+                            ),
+                            {
+                              shouldDirty: true,
+                              shouldTouch: true,
+                              shouldValidate: true,
+                            },
+                          )
+                        }
+                      >
+                        {t('ItemsField.removeRedundantLine', {
+                          title: redundantItem.title,
+                        })}
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 {/* Local state, not a form field: the derived shares are
                     what gets saved, so there is nothing to persist. */}
                 <label className="flex flex-row gap-2 items-start cursor-pointer">

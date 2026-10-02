@@ -67,13 +67,32 @@ Then guess the category for this receipt among the following categories and stor
 Guess the expense’s date and store it as yyyy-mm-dd.
 Guess a title for the expense.
 Read every purchased line item into \`items\`, in the order they are printed:
-- \`title\`: the product name as written on the receipt.
+- \`title\`: the product name, tidied up for someone reading it later. Keep the
+  receipt's own language and anything that identifies the product — the brand,
+  the variety, the size or weight. Write it in ordinary sentence case instead of
+  all capitals, separate words that the receipt ran together, put a space
+  between a number and its unit, and expand an abbreviation only when you are
+  sure what it stands for. Drop what identifies the line to the till rather than
+  to a person: a trailing tax-class letter, an article or PLU number, a
+  repeated store name. Never replace a word you cannot read with a guess —
+  leave it as printed.
+  For example \`PIZZA WYNOS TEX-MEX 492g-B\` becomes \`Pizza wynos Tex-Mex 492 g\`,
+  and \`JabłSuszAnanas80g\` becomes \`Jabłka suszone ananas 80 g\`.
 - \`amount\`: the price printed for that line, as a non-formatted number. For a
   line with a quantity, this is the line total, not the unit price.
+A line that discounts another line — a rebate, a loyalty price, a coupon,
+printed under the product it applies to — is not an item of its own. Subtract it
+from that product's line and return the one discounted price, so a 8.99 line
+followed by a -1.49 rebate is a single item at 7.50.
+Read nothing into \`items\` that the receipt is adding up rather than selling:
+subtotals, a total of all discounts, tax or VAT lines, a payment or change line,
+or the grand total. These restate figures that are already in the lines above
+them, and counting them again makes the items disagree with the total. Only what
+the shopper actually put in the basket is an item.
 Do not invent items, prices or dates that cannot be read from the image, and do
 not reconstruct a price the receipt does not print. Return an empty \`items\`
 list if no line items are legible. The items do not have to add up to the
-total — a receipt may also carry tax, tips or discounts.`
+total — a receipt may also carry tax or tips.`
 }
 
 async function extractWithGemini(
