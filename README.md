@@ -223,6 +223,12 @@ container gets its environment.
 
 ## Opt-in features
 
+Every feature below is off until you configure it. Most of them are upstream
+Spliit; the ones this fork adds are [storing documents in a folder](#in-a-folder-on-the-server)
+instead of S3, [reading receipts with Gemini](#reading-receipts-with-gemini-instead),
+[a Gemini key per group](#a-gemini-key-per-group) and [expense items](#expense-items).
+Receipt scanning itself is upstream, and works with OpenAI alone.
+
 ### Expense documents
 
 Spliit offers users to upload images and attach them to expenses. The images go
@@ -254,6 +260,10 @@ Things worth knowing:
 
 - **Only JPEG and PNG are stored**, the same two types the upload button
   accepts, up to 5 MB per image. Everything else is refused by the server.
+- **Oversized images are shrunk, not refused.** A photo over 5 MB is capped at
+  2400px on its longest edge and re-encoded as JPEG in the browser before it is
+  uploaded — so a 12 MB phone photo goes through. The limit is still enforced
+  server-side for whatever does not come from the app's own upload button.
 - **The images are served by the app**, from `/api/uploads/<name>`, under a
   generated name. Anyone holding that URL can open it, exactly as with the
   public S3 bucket this replaces — the name is unguessable, nothing more.
@@ -282,30 +292,36 @@ S3_UPLOAD_ENDPOINT=http://localhost:9000
 
 ### Create expense from receipt
 
-You can offer users to create expense by uploading a receipt. The scan reads the total, the date, a title, a category and the receipt's individual line items, which are filled into the new expense (see _Expense items_ below). It relies on a vision-capable model and on expense documents being stored somewhere — a folder or S3, either works.
+Users can create an expense by uploading a receipt: the scan reads the total, the date, a title and a category, and this fork additionally reads the receipt's line items into the expense (see [Expense items](#expense-items)).
 
-To enable the feature:
+Two things are needed:
 
-- You must enable expense documents feature as well (see section above). That might change in the future, but for now we need to store images to make receipt scanning work.
-- Get an API key for a vision-capable model, either from [OpenAI](https://platform.openai.com/docs/guides/vision) or from [Google AI Studio](https://aistudio.google.com/apikey) (you might need to buy credits in advance).
-- Update your environment variables with appropriate values:
+- **Expense documents enabled**, since the image has to be stored somewhere — a folder or S3, either works (see the section above).
+- **A key for a vision-capable model.** OpenAI and Gemini are both supported, and with this fork a key can also be set per group instead of instance-wide.
+
+#### Where the key comes from
+
+The first of these that exists is the one used for a scan:
+
+1. the group's own Gemini key, set in its settings (this fork, see below),
+2. `GEMINI_API_KEY`,
+3. `OPENAI_API_KEY`.
+
+`ENABLE_RECEIPT_EXTRACT=true` with none of them set is accepted, because a group may bring the only key. A scan that finds no key fails at scan time, with the reason in the server log.
+
+#### With OpenAI
 
 ```.env
+ENABLE_EXPENSE_DOCUMENTS=true
 ENABLE_RECEIPT_EXTRACT=true
 OPENAI_API_KEY=XXXXXXXXXXXXXXXXXXXXXXXXXXXX
 ```
 
-The model defaults to `gpt-5-nano` and can be changed with the optional `OPENAI_MODEL_RECEIPT_EXTRACT` variable — a larger model reads poor-quality photos more reliably, at a higher price per scan.
+Get a key from [OpenAI](https://platform.openai.com/docs/guides/vision) — you might need to buy credits in advance. The model defaults to `gpt-5-nano`, and `OPENAI_MODEL_RECEIPT_EXTRACT` picks another one: a larger model reads poor-quality photos more reliably, at a higher price per scan.
 
 #### Reading receipts with Gemini instead
 
-Receipts can also be read by Google's [Gemini API](https://ai.google.dev/gemini-api/docs), which has a free tier. **`ENABLE_RECEIPT_EXTRACT` is satisfied by either key**, so an instance that only scans receipts needs no OpenAI account at all.
-
-To set it up:
-
-- Enable expense documents, as for any receipt scanning (see above) — the image still has to be stored somewhere.
-- Create a key at [Google AI Studio](https://aistudio.google.com/apikey). The free tier is rate-limited but needs no card; a paid key is the same variable.
-- Set the two variables, and no OpenAI ones:
+Receipts can also be read by Google's [Gemini API](https://ai.google.dev/gemini-api/docs), which has a free tier — so an instance that only scans receipts needs no OpenAI account at all.
 
 ```.env
 ENABLE_EXPENSE_DOCUMENTS=true
@@ -313,33 +329,20 @@ ENABLE_RECEIPT_EXTRACT=true
 GEMINI_API_KEY=XXXXXXXXXXXXXXXXXXXXXXXXXXXX
 ```
 
-- Optionally pick a different model with `GEMINI_MODEL_RECEIPT_EXTRACT`. It defaults to `gemini-3.1-flash-lite`; any vision-capable Gemini model works, and a larger one reads poor-quality photos more reliably.
+Create a key at [Google AI Studio](https://aistudio.google.com/apikey). The free tier is rate-limited but needs no card, and a paid key is the same variable. `GEMINI_MODEL_RECEIPT_EXTRACT` defaults to `gemini-3.1-flash-lite` and takes any vision-capable Gemini model.
 
 #### A Gemini key per group
 
-Each group can carry its own Gemini key, set in **Settings → Receipt scanning**,
-which is used instead of the instance-wide `GEMINI_API_KEY` for that group's
-receipts. That is what makes `ENABLE_RECEIPT_EXTRACT=true` useful on a shared
-instance: the operator turns the feature on, each group pays for its own scans,
-and the instance needs no key of its own.
+Each group can carry its own Gemini key, set in **Settings → Receipt scanning**, which is used for that group's receipts instead of the instance-wide `GEMINI_API_KEY`. That is what makes the feature practical on a shared instance: the operator turns it on, each group pays for its own scans, and the instance needs no key of its own.
 
-Because of that, `ENABLE_RECEIPT_EXTRACT` no longer requires any key at startup.
-A scan with no key available — neither the group's nor the instance's, and no
-`OPENAI_API_KEY` either — fails at scan time with an error in the server log.
+The key is write-only. Anyone holding the group link can scan receipts with it, but the saved value is never sent to a browser: `getGroup` strips it, the settings field shows a mask (`••••••••••••`), and sending that mask back unchanged leaves the stored key alone. Emptying the field removes the key.
 
-The key is write-only. Anyone holding the group link can scan receipts with it,
-but the saved value is never sent to a browser: `getGroup` strips it, the
-settings field shows a mask (`••••••••••••`), and sending that mask back leaves
-the stored key alone. Emptying the field removes the key. It is stored as given
-in the `Group.geminiApiKey` column, so the database is as sensitive as the keys
-in it — treat a dump accordingly.
+It is stored as given in the `Group.geminiApiKey` column — the database is as sensitive as the keys in it, so treat a dump accordingly.
 
-Things worth knowing:
+Things worth knowing about the Gemini path:
 
-- **A Gemini key wins over OpenAI.** With a key for Gemini available — the
-  group's or the instance's — receipts go to Gemini, and the OpenAI key is only
-  used for _Deduce category from title_, which has no Gemini path.
-- **The app downloads the image.** Unlike OpenAI, Gemini does not fetch the receipt URL itself, so the server pulls it from your S3 storage (or reads it from `UPLOADS_DIR`) and sends it inline. Images over 10 MB are refused.
+- **A Gemini key wins over OpenAI.** Whenever one is available — the group's or the instance's — receipts go to Gemini, and the OpenAI key is only used for _Deduce category from title_, which has no Gemini path.
+- **The app downloads the image.** Unlike OpenAI, Gemini does not fetch the receipt URL itself, so the server pulls it from S3, or reads it from `UPLOADS_DIR`, and sends it inline. Images over 10 MB are refused.
 - **`OPENAI_BASE_URL` does not apply.** It configures the OpenAI client only; the Gemini path always talks to `generativelanguage.googleapis.com`.
 - **Schema rejection is handled.** If the model rejects the JSON schema with a 400, the request is retried once without it, since the prompt alone still names every field.
 
@@ -530,10 +533,12 @@ Upstream commits touching each file in the last twelve months, against what the 
 | File                           | Upstream commits | The fork's footprint                                                      |
 | ------------------------------ | ---------------- | ------------------------------------------------------------------------- |
 | `expense-form.tsx`             | 18               | three `defaultValues` blocks, two lines in `submit()`, one effect, one `<Card>`, two `disabled={}` |
-| `messages/en-US.json`          | 11               | `ExpenseForm.ItemsField`, two `CreateFromReceipt` keys                    |
+| `messages/en-US.json`          | 11               | `ExpenseForm.ItemsField`, `GroupForm.ReceiptScanning`, two `CreateFromReceipt` keys |
 | `api.ts`, `env.ts`, `schemas.ts` | 5 each         | small and localized                                                       |
-| `prisma/schema.prisma`         | 2                | three additions                                                           |
-| `gemini.ts`, `gemini-key.ts`, `items.ts`, `uploads.ts`, `expense-items-input.tsx`, `receipt-items.ts`, `api/uploads/`, the migrations | — | new files, so they can never conflict |
+| `prisma/schema.prisma`         | 2                | the `ExpenseItem` model, two relations, `Group.geminiApiKey`               |
+| `group-form.tsx`, `edit-group.tsx`, `edit/page.tsx` | few | one `<Card>` and one prop threaded to it                      |
+| `s3-upload/route.ts`, `uploaded-image-url.ts`, `share-button.tsx`, `create-from-receipt-button*` | few | one branch each |
+| `gemini.ts`, `gemini-key.ts`, `items.ts`, `uploads.ts`, `image-upload.ts`, `expense-items-input.tsx`, `receipt-items.ts`, `api/uploads/`, `scripts/sync-upstream.sh`, the migrations | — | new files, so they can never conflict |
 
 That distribution is deliberate, and worth preserving when adding to the fork:
 

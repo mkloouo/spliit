@@ -49,7 +49,8 @@ check() {
   grep -q 'ReceiptScanning' messages/en-US.json ||
     die 'messages/en-US.json lost the fork’s GroupForm.ReceiptScanning strings'
   for file in src/lib/items.ts src/lib/gemini.ts src/lib/gemini-key.ts \
-    src/lib/uploads.ts 'src/app/api/uploads/[name]/route.ts' \
+    src/lib/uploads.ts src/lib/image-upload.ts \
+    'src/app/api/uploads/[name]/route.ts' \
     'src/app/groups/[groupId]/expenses/expense-items-input.tsx' \
     'src/app/groups/[groupId]/expenses/receipt-items.ts'; do
     [ -f "$file" ] || die "$file is gone"

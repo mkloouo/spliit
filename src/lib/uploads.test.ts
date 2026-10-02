@@ -1,11 +1,10 @@
 import { env } from './env'
+import { UPLOADS_BUCKET, UPLOADS_ENDPOINT } from './image-upload'
 import {
   newUploadFileName,
   uploadFileName,
   uploadFileNameFromUrl,
   uploadMimeType,
-  UPLOADS_BUCKET,
-  UPLOADS_ENDPOINT,
 } from './uploads'
 
 // `uploadsDir()` reads UPLOADS_DIR off `env` live, so a mutable mock is enough.

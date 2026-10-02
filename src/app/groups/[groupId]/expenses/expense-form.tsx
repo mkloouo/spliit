@@ -702,7 +702,14 @@ export function ExpenseForm({
 
   return (
     <Form {...form}>
-      <form onSubmit={form.handleSubmit(submit)}>
+      <form
+        onSubmit={form.handleSubmit(submit, (errors) => {
+          // A field whose error nothing renders — `documents`, say — would
+          // otherwise just make the save button do nothing at all, with no
+          // way to tell why.
+          console.error('Expense form not saved, invalid:', errors)
+        })}
+      >
         <Card>
           <CardHeader>
             <CardTitle>

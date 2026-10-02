@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { MAX_UPLOAD_BYTES } from '@/lib/image-upload'
 import {
-  MAX_UPLOAD_BYTES,
   uploadFileName,
   uploadMimeType,
   uploadPath,

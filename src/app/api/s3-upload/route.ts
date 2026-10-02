@@ -1,12 +1,11 @@
 import { randomId } from '@/lib/api'
 import { env } from '@/lib/env'
 import {
-  newUploadFileName,
   UPLOADS_BUCKET,
   UPLOADS_ENDPOINT,
   UPLOADS_URL_PREFIX,
-  uploadsDir,
-} from '@/lib/uploads'
+} from '@/lib/image-upload'
+import { newUploadFileName, uploadsDir } from '@/lib/uploads'
 import { POST as route } from 'next-s3-upload/route'
 import type { NextRequest } from 'next/server'
 

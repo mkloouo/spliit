@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dialog'
 import { ToastAction } from '@/components/ui/toast'
 import { useToast } from '@/components/ui/use-toast'
+import { downscaleImage, MAX_UPLOAD_BYTES } from '@/lib/image-upload'
 import { randomId } from '@/lib/random'
 import { ExpenseFormValues } from '@/lib/schemas'
 import { formatFileSize } from '@/lib/utils'
@@ -33,8 +34,6 @@ type Props = {
   onDocumentAttached?: () => void
 }
 
-const MAX_FILE_SIZE = 5 * 1024 ** 2
-
 export function ExpenseDocumentsInput({
   documents,
   updateDocuments,
@@ -47,24 +46,26 @@ export function ExpenseDocumentsInput({
   const { toast } = useToast()
 
   const handleFileChange = async (file: File) => {
-    if (file.size > MAX_FILE_SIZE) {
-      toast({
-        title: t('TooBigToast.title'),
-        description: t('TooBigToast.description', {
-          maxSize: formatFileSize(MAX_FILE_SIZE, locale),
-          size: formatFileSize(file.size, locale),
-        }),
-        variant: 'destructive',
-      })
-      return
-    }
-
     const upload = async () => {
       try {
         setPending(true)
-        const { width, height } = await getImageData(file)
+        // A photo straight off a phone is routinely over the limit, so shrink
+        // it rather than refusing it; only what still does not fit is refused.
+        const image = await downscaleImage(file)
+        if (image.size > MAX_UPLOAD_BYTES) {
+          toast({
+            title: t('TooBigToast.title'),
+            description: t('TooBigToast.description', {
+              maxSize: formatFileSize(MAX_UPLOAD_BYTES, locale),
+              size: formatFileSize(image.size, locale),
+            }),
+            variant: 'destructive',
+          })
+          return
+        }
+        const { width, height } = await getImageData(image)
         if (!width || !height) throw new Error('Cannot get image dimensions')
-        const { url } = await uploadToS3(file)
+        const { url } = await uploadToS3(image)
         updateDocuments([...documents, { id: randomId(), url, width, height }])
         onDocumentAttached?.()
       } catch (err) {

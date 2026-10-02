@@ -27,6 +27,7 @@ import { ToastAction } from '@/components/ui/toast'
 import { useToast } from '@/components/ui/use-toast'
 import { useAnalytics } from '@/lib/analytics/context'
 import { useMediaQuery } from '@/lib/hooks'
+import { downscaleImage, MAX_UPLOAD_BYTES } from '@/lib/image-upload'
 import {
   formatCurrency,
   formatDate,
@@ -42,8 +43,6 @@ import { useRouter } from 'next/navigation'
 import { PropsWithChildren, ReactNode, useState } from 'react'
 import { useCurrentGroup } from '../current-group-context'
 import { stashReceiptItems } from './receipt-items'
-
-const MAX_FILE_SIZE = 5 * 1024 ** 2
 
 export function CreateFromReceiptButton() {
   const t = useTranslations('CreateFromReceipt')
@@ -97,18 +96,6 @@ function ReceiptDialogContent() {
   >(null)
 
   const handleFileChange = async (file: File) => {
-    if (file.size > MAX_FILE_SIZE) {
-      toast({
-        title: t('TooBigToast.title'),
-        description: t('TooBigToast.description', {
-          maxSize: formatFileSize(MAX_FILE_SIZE, locale),
-          size: formatFileSize(file.size, locale),
-        }),
-        variant: 'destructive',
-      })
-      return
-    }
-
     const upload = async () => {
       sendEvent(
         { event: 'expense: scan receipt', props: {} },
@@ -116,12 +103,26 @@ function ReceiptDialogContent() {
       )
       try {
         setPending(true)
+        // A photo straight off a phone is routinely over the limit, so shrink
+        // it rather than refusing it; only what still does not fit is refused.
+        const image = await downscaleImage(file)
+        if (image.size > MAX_UPLOAD_BYTES) {
+          toast({
+            title: t('TooBigToast.title'),
+            description: t('TooBigToast.description', {
+              maxSize: formatFileSize(MAX_UPLOAD_BYTES, locale),
+              size: formatFileSize(image.size, locale),
+            }),
+            variant: 'destructive',
+          })
+          return
+        }
         console.log('Uploading image…')
-        let { url } = await uploadToS3(file)
+        let { url } = await uploadToS3(image)
         console.log('Extracting information from receipt…')
         const { amount, categoryId, date, title, items } =
           await extractExpenseInformationFromImage(groupId, url)
-        const { width, height } = await getImageData(file)
+        const { width, height } = await getImageData(image)
         setReceiptInfo({
           amount,
           categoryId,

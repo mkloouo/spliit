@@ -50,12 +50,16 @@ export function ExpenseItemsInput({
         <p className="text-sm text-muted-foreground">{t('empty')}</p>
       )}
       {items.map((item, index) => (
+        // On a phone the title gets a line of its own — item names are long
+        // enough that sharing one with the amount truncates most of them — and
+        // the three narrow controls share the line below it. From `sm` up it is
+        // all one row.
         <div
           key={item.id}
-          className="flex flex-wrap gap-2 items-center border-t last-of-type:border-b -mx-6 px-6 py-2"
+          className="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_auto_auto] gap-2 items-center border-t last-of-type:border-b -mx-6 px-6 py-2"
         >
           <Input
-            className="text-base flex-1 min-w-[140px] -my-2"
+            className="text-base col-span-2 sm:col-span-1 sm:-my-2 sm:min-w-[140px]"
             maxLength={200}
             placeholder={t('titlePlaceholder')}
             value={item.title}
@@ -63,10 +67,17 @@ export function ExpenseItemsInput({
               replace(index, { ...item, title: event.target.value })
             }
           />
-          <div className="flex gap-1 items-center">
+          <ItemParticipants
+            participants={participants}
+            selected={item.participants ?? []}
+            onChange={(selected) =>
+              replace(index, { ...item, participants: selected })
+            }
+          />
+          <div className="flex gap-1 items-center sm:-my-2">
             <span className="text-sm">{currency.symbol}</span>
             <Input
-              className="text-base w-[90px] -my-2"
+              className="text-base w-[90px]"
               type="text"
               inputMode="decimal"
               step={10 ** -currency.decimal_digits}
@@ -78,24 +89,17 @@ export function ExpenseItemsInput({
                 })
               }
             />
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="shrink-0"
+              title={t('remove')}
+              onClick={() => updateItems(items.filter((_, i) => i !== index))}
+            >
+              <X className="w-4 h-4" />
+            </Button>
           </div>
-          <ItemParticipants
-            participants={participants}
-            selected={item.participants ?? []}
-            onChange={(selected) =>
-              replace(index, { ...item, participants: selected })
-            }
-          />
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="-my-2"
-            title={t('remove')}
-            onClick={() => updateItems(items.filter((_, i) => i !== index))}
-          >
-            <X className="w-4 h-4" />
-          </Button>
         </div>
       ))}
       <Button
@@ -146,7 +150,9 @@ function ItemParticipants({
           variant="outline"
           size="sm"
           className={cn(
-            'max-w-[160px] -my-2 font-normal',
+            // Fills its cell on the phone layout, stays compact next to the
+            // title on a wide one.
+            'h-10 w-full justify-start font-normal sm:-my-2 sm:w-auto sm:max-w-[160px]',
             names.length === 0 && 'text-muted-foreground',
           )}
           title={t('forWhom')}

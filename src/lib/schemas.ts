@@ -2,6 +2,7 @@ import { RecurrenceRule, SplitMode } from '@/generated/prisma/browser'
 import Decimal from 'decimal.js'
 import * as z from 'zod'
 import { GEMINI_API_KEY_MAX } from './gemini-key'
+import { isDocumentUrl } from './image-upload'
 
 export const GROUP_INFORMATION_MAX = 10_000
 export const EXPENSE_NOTES_MAX = 5_000
@@ -145,7 +146,10 @@ export const expenseFormSchema = z
       .array(
         z.object({
           id: z.string().max(64),
-          url: z.string().url().max(2000),
+          // Not `z.string().url()`: a document stored in UPLOADS_DIR is
+          // served from a path of our own, which that rejects — silently
+          // killing the save, since nothing renders this field's error.
+          url: z.string().max(2000).refine(isDocumentUrl, 'invalidDocumentUrl'),
           width: z.number().int().min(1),
           height: z.number().int().min(1),
         }),

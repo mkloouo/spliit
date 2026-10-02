@@ -2,9 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { env } from './env'
-
-/** Largest upload we store, mirroring the client-side check. */
-export const MAX_UPLOAD_BYTES = 5 * 1024 ** 2
+import { MAX_UPLOAD_BYTES, UPLOADS_URL_PREFIX } from './image-upload'
 
 /** The image types the upload input accepts, and nothing else. */
 const MIME_BY_EXTENSION: Record<string, string> = {
@@ -12,13 +10,6 @@ const MIME_BY_EXTENSION: Record<string, string> = {
   '.jpeg': 'image/jpeg',
   '.png': 'image/png',
 }
-
-// next-s3-upload's presigned flow composes a file's final URL as
-// `${endpoint}/${bucket}/${key}`, so the local storage route is handed out
-// split along those lines (see src/app/api/s3-upload/route.ts).
-export const UPLOADS_ENDPOINT = '/api'
-export const UPLOADS_BUCKET = 'uploads'
-export const UPLOADS_URL_PREFIX = `${UPLOADS_ENDPOINT}/${UPLOADS_BUCKET}/`
 
 /**
  * The folder expense documents are stored in, or null when they go to S3.
