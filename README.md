@@ -21,6 +21,8 @@ Spliit is a free and open source alternative to Splitwise. You can either use th
 - [x] Create expense by scanning a receipt [(#23)](https://github.com/spliit-app/spliit/issues/23)
 - [x] List the items an expense is made up of, and split it by them — fork only, see [Expense items](#expense-items)
 - [x] Read receipts with Google Gemini as well as OpenAI — fork only, see [Reading receipts with Gemini instead](#reading-receipts-with-gemini-instead)
+- [x] Give each group its own Gemini key — fork only, see [A Gemini key per group](#a-gemini-key-per-group)
+- [x] Keep expense documents in a folder instead of S3 — fork only, see [In a folder on the server](#in-a-folder-on-the-server)
 
 ### Possible incoming features
 
@@ -223,7 +225,43 @@ container gets its environment.
 
 ### Expense documents
 
-Spliit offers users to upload images (to an AWS S3 bucket) and attach them to expenses. To enable this feature:
+Spliit offers users to upload images and attach them to expenses. The images go
+either into a folder on the server or into an S3 bucket.
+
+#### In a folder on the server
+
+The option that needs no object storage at all: point `UPLOADS_DIR` at a folder
+and the app stores the images there.
+
+```.env
+ENABLE_EXPENSE_DOCUMENTS=true
+UPLOADS_DIR=./uploads
+```
+
+The folder is created on the first upload, and it is the only thing that has to
+be backed up alongside the database — the expense refers to its image by URL,
+so deleting the folder leaves broken images behind.
+
+In a container, mount a host folder at the path you set; `compose.yaml` has a
+commented-out volume ready for it:
+
+```yaml
+volumes:
+  - ./uploads:/usr/app/uploads
+```
+
+Things worth knowing:
+
+- **Only JPEG and PNG are stored**, the same two types the upload button
+  accepts, up to 5 MB per image. Everything else is refused by the server.
+- **The images are served by the app**, from `/api/uploads/<name>`, under a
+  generated name. Anyone holding that URL can open it, exactly as with the
+  public S3 bucket this replaces — the name is unguessable, nothing more.
+- **`UPLOADS_DIR` wins over `S3_*`.** If both are configured, uploads go to the
+  folder. Images already in S3 keep working, since each document carries its
+  own URL.
+
+#### In an S3 bucket
 
 - Follow the instructions in the _S3 bucket_ and _IAM user_ sections of [next-s3-upload](https://next-s3-upload.codingvalue.com/setup#s3-bucket) to create and set up an S3 bucket where images will be stored.
 - Update your environments variables with appropriate values:
@@ -244,7 +282,7 @@ S3_UPLOAD_ENDPOINT=http://localhost:9000
 
 ### Create expense from receipt
 
-You can offer users to create expense by uploading a receipt. The scan reads the total, the date, a title, a category and the receipt's individual line items, which are filled into the new expense (see _Expense items_ below). It relies on a vision-capable model and a public S3 storage endpoint.
+You can offer users to create expense by uploading a receipt. The scan reads the total, the date, a title, a category and the receipt's individual line items, which are filled into the new expense (see _Expense items_ below). It relies on a vision-capable model and on expense documents being stored somewhere — a folder or S3, either works.
 
 To enable the feature:
 
@@ -277,10 +315,31 @@ GEMINI_API_KEY=XXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 - Optionally pick a different model with `GEMINI_MODEL_RECEIPT_EXTRACT`. It defaults to `gemini-3.1-flash-lite`; any vision-capable Gemini model works, and a larger one reads poor-quality photos more reliably.
 
+#### A Gemini key per group
+
+Each group can carry its own Gemini key, set in **Settings → Receipt scanning**,
+which is used instead of the instance-wide `GEMINI_API_KEY` for that group's
+receipts. That is what makes `ENABLE_RECEIPT_EXTRACT=true` useful on a shared
+instance: the operator turns the feature on, each group pays for its own scans,
+and the instance needs no key of its own.
+
+Because of that, `ENABLE_RECEIPT_EXTRACT` no longer requires any key at startup.
+A scan with no key available — neither the group's nor the instance's, and no
+`OPENAI_API_KEY` either — fails at scan time with an error in the server log.
+
+The key is write-only. Anyone holding the group link can scan receipts with it,
+but the saved value is never sent to a browser: `getGroup` strips it, the
+settings field shows a mask (`••••••••••••`), and sending that mask back leaves
+the stored key alone. Emptying the field removes the key. It is stored as given
+in the `Group.geminiApiKey` column, so the database is as sensitive as the keys
+in it — treat a dump accordingly.
+
 Things worth knowing:
 
-- **`GEMINI_API_KEY` wins.** If both keys are set, receipts go to Gemini and the OpenAI key is only used for _Deduce category from title_, which has no Gemini path. Set `GEMINI_API_KEY` only if that is what you want.
-- **The app downloads the image.** Unlike OpenAI, Gemini does not fetch the receipt URL itself, so the server pulls it from your S3 storage and sends it inline. Images over 10 MB are refused.
+- **A Gemini key wins over OpenAI.** With a key for Gemini available — the
+  group's or the instance's — receipts go to Gemini, and the OpenAI key is only
+  used for _Deduce category from title_, which has no Gemini path.
+- **The app downloads the image.** Unlike OpenAI, Gemini does not fetch the receipt URL itself, so the server pulls it from your S3 storage (or reads it from `UPLOADS_DIR`) and sends it inline. Images over 10 MB are refused.
 - **`OPENAI_BASE_URL` does not apply.** It configures the OpenAI client only; the Gemini path always talks to `generativelanguage.googleapis.com`.
 - **Schema rejection is handled.** If the model rejects the JSON schema with a 400, the request is retried once without it, since the prompt alone still names every field.
 
@@ -409,7 +468,7 @@ A provider supplies a transport — where events go — and optionally a `Script
 
 ## Maintaining this fork
 
-This repository is a fork of [spliit-app/spliit](https://github.com/spliit-app/spliit) that adds two things of its own: [expense items](#expense-items) and [reading receipts with Gemini](#reading-receipts-with-gemini-instead). Everything else is upstream, and the point of this section is to keep it that way — upstream stays pullable, and the fork's changes stay a small, reviewable diff on top.
+This repository is a fork of [spliit-app/spliit](https://github.com/spliit-app/spliit) that adds a few things of its own: [expense items](#expense-items), [reading receipts with Gemini](#reading-receipts-with-gemini-instead) including [a key per group](#a-gemini-key-per-group), and [storing expense documents in a folder](#in-a-folder-on-the-server) rather than S3. Everything else is upstream, and the point of this section is to keep it that way — upstream stays pullable, and the fork's changes stay a small, reviewable diff on top.
 
 ### Branch model
 
@@ -423,6 +482,24 @@ git fetch upstream
 ```
 
 ### Pulling from upstream
+
+[`scripts/sync-upstream.sh`](./scripts/sync-upstream.sh) does the whole dance
+below, stopping where a human is needed:
+
+```bash
+./scripts/sync-upstream.sh            # fetch, mirror main, rebase, verify
+./scripts/sync-upstream.sh continue   # after resolving conflicts
+./scripts/sync-upstream.sh check      # just the verification checks
+./scripts/sync-upstream.sh diff       # what the fork adds to upstream
+```
+
+It never pushes; it prints the two push commands once everything is green, so
+the rebase can be reviewed first. Besides types, tests and formatting it also
+checks that the fork's own pieces — the migrations, the `en-US` strings, the new
+files — still exist, which is the failure mode a passing test suite would not
+catch.
+
+By hand, the same thing:
 
 ```bash
 # 1. fast-forward the mirror
@@ -456,17 +533,18 @@ Upstream commits touching each file in the last twelve months, against what the 
 | `messages/en-US.json`          | 11               | `ExpenseForm.ItemsField`, two `CreateFromReceipt` keys                    |
 | `api.ts`, `env.ts`, `schemas.ts` | 5 each         | small and localized                                                       |
 | `prisma/schema.prisma`         | 2                | three additions                                                           |
-| `gemini.ts`, `items.ts`, `expense-items-input.tsx`, `receipt-items.ts`, the migration | — | new files, so they can never conflict |
+| `gemini.ts`, `gemini-key.ts`, `items.ts`, `uploads.ts`, `expense-items-input.tsx`, `receipt-items.ts`, `api/uploads/`, the migrations | — | new files, so they can never conflict |
 
 That distribution is deliberate, and worth preserving when adding to the fork:
 
 - **The logic lives in new files.** Deriving a split from items is `src/lib/items.ts`, with its own tests, rather than code inside the form. If upstream rewrites `expense-form.tsx` wholesale, you re-apply a handful of small hunks and never the algorithm.
 - **Nothing downstream of the split was touched.** "Split by items" saves an ordinary `BY_AMOUNT` split, so `balances.ts`, `totals.ts`, `shares.ts` and the CSV export — all files upstream does change — needed no modification at all.
 - **Translations cannot break.** `src/i18n/request.ts` deepmerges every locale over `en-US`, so upstream's constant Weblate updates are safe: a string the fork added simply renders in English until someone translates it.
+- **Secrets are stripped in one place.** A group's Gemini key is removed in `getGroup`, which every caller already goes through, rather than in each procedure that returns a group.
 
 ### One hazard: migration ordering
 
-The fork's migration is `prisma/migrations/20261002000000_add_expense_items`. If upstream later adds a migration dated *earlier* than that, a fresh database applies upstream's first while an existing one applied the fork's first. That is harmless here, because the fork's migration only creates new tables, but keep it in mind for anything less self-contained.
+The fork's migrations are `prisma/migrations/20261002000000_add_expense_items` and `20261003000000_add_group_gemini_api_key`. If upstream later adds a migration dated *earlier* than that, a fresh database applies upstream's first while an existing one applied the fork's first. That is harmless here, because the fork's migration only creates new tables, but keep it in mind for anything less self-contained.
 
 **Do not rename that directory once it has been deployed.** Prisma records applied migrations by name in `_prisma_migrations`, and a rename reads as one migration having vanished and an unknown one having appeared.
 
@@ -518,9 +596,18 @@ networks:
 Start from [`container.env.example`](./container.env.example), and add the fork's own variables for receipt scanning:
 
 ```.env
-ENABLE_EXPENSE_DOCUMENTS=true # receipts need S3; set the S3_* variables too
+ENABLE_EXPENSE_DOCUMENTS=true
+UPLOADS_DIR=/usr/app/uploads # or configure S3_* instead
 ENABLE_RECEIPT_EXTRACT=true
 GEMINI_API_KEY=XXXXXXXXXXXXXXXXXXXXXXXXXXXX
+```
+
+With `UPLOADS_DIR`, give the app service a volume for it, or the images go when
+the container does:
+
+```yaml
+    volumes:
+      - uploads:/usr/app/uploads
 ```
 
 Expense items need no configuration or feature flag; only reading receipts does.

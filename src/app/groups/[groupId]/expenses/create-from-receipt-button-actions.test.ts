@@ -6,6 +6,7 @@ import { extractExpenseInformationFromImage } from './create-from-receipt-button
 var mockCreate = jest.fn()
 var mockGenerate = jest.fn()
 var mockFetchImage = jest.fn()
+var mockGroupKey = jest.fn()
 
 jest.mock('../../../../lib/gemini', () => ({
   fetchImageAsInlineData: (...args: unknown[]) => mockFetchImage(...args),
@@ -37,12 +38,17 @@ jest.mock('../../../../lib/api', () => ({
     { id: 0, grouping: 'General', name: 'General' },
     { id: 4, grouping: 'Transport', name: 'Taxi' },
   ],
+  getGroupGeminiApiKey: (...args: unknown[]) => mockGroupKey(...args),
 }))
 jest.mock('../../../../lib/uploaded-image-url', () => ({
   isAllowedUploadUrl: (url: string) => url.startsWith('https://uploads.test/'),
 }))
 
+const GROUP = 'group-1'
 const IMAGE = 'https://uploads.test/receipt.jpg'
+
+// No group key unless a test sets one.
+beforeEach(() => mockGroupKey.mockResolvedValue(null))
 
 function respondWith(content: string | null) {
   mockCreate.mockResolvedValue({ choices: [{ message: { content } }] })
@@ -72,7 +78,7 @@ describe('extractExpenseInformationFromImage', () => {
         ],
       }),
     )
-    expect(await extractExpenseInformationFromImage(IMAGE)).toEqual({
+    expect(await extractExpenseInformationFromImage(GROUP, IMAGE)).toEqual({
       amount: 42.5,
       categoryId: '4',
       date: '2026-03-01',
@@ -94,7 +100,9 @@ describe('extractExpenseInformationFromImage', () => {
         items: [],
       }),
     )
-    expect((await extractExpenseInformationFromImage(IMAGE)).items).toEqual([])
+    expect(
+      (await extractExpenseInformationFromImage(GROUP, IMAGE)).items,
+    ).toEqual([])
   })
 
   it('drops items the model could not actually read', async () => {
@@ -110,9 +118,9 @@ describe('extractExpenseInformationFromImage', () => {
         ],
       }),
     )
-    expect((await extractExpenseInformationFromImage(IMAGE)).items).toEqual([
-      { title: 'Beer', amount: 12.5 },
-    ])
+    expect(
+      (await extractExpenseInformationFromImage(GROUP, IMAGE)).items,
+    ).toEqual([{ title: 'Beer', amount: 12.5 }])
   })
 
   it('keeps a title containing a comma intact', async () => {
@@ -124,7 +132,7 @@ describe('extractExpenseInformationFromImage', () => {
         title: 'Dinner, drinks and tip',
       }),
     )
-    const info = await extractExpenseInformationFromImage(IMAGE)
+    const info = await extractExpenseInformationFromImage(GROUP, IMAGE)
     expect(info.title).toBe('Dinner, drinks and tip')
     expect(info.amount).toBe(42.5)
   })
@@ -138,7 +146,7 @@ describe('extractExpenseInformationFromImage', () => {
         title: 'x',
       }),
     )
-    await extractExpenseInformationFromImage(IMAGE)
+    await extractExpenseInformationFromImage(GROUP, IMAGE)
 
     const request = mockCreate.mock.calls[0][0]
     expect(request.model).toBe('test-vision-model')
@@ -161,14 +169,14 @@ describe('extractExpenseInformationFromImage', () => {
     ['an empty response', ''],
   ])('reports nothing extracted for %s', async (_name, content) => {
     respondWith(content)
-    expect(await extractExpenseInformationFromImage(IMAGE)).toEqual(
+    expect(await extractExpenseInformationFromImage(GROUP, IMAGE)).toEqual(
       NOTHING_EXTRACTED,
     )
   })
 
   it('reports nothing extracted when there is no content at all', async () => {
     respondWith(null)
-    expect(await extractExpenseInformationFromImage(IMAGE)).toEqual(
+    expect(await extractExpenseInformationFromImage(GROUP, IMAGE)).toEqual(
       NOTHING_EXTRACTED,
     )
   })
@@ -176,7 +184,10 @@ describe('extractExpenseInformationFromImage', () => {
   it('refuses an image URL the app did not upload', async () => {
     respondWith(JSON.stringify({ amount: 1 }))
     await expect(
-      extractExpenseInformationFromImage('https://evil.example/receipt.jpg'),
+      extractExpenseInformationFromImage(
+        GROUP,
+        'https://evil.example/receipt.jpg',
+      ),
     ).rejects.toThrow('Invalid image URL.')
     expect(mockCreate).not.toHaveBeenCalled()
   })
@@ -196,6 +207,14 @@ describe('extractExpenseInformationFromImage, with a Gemini key', () => {
     delete mockEnv.GEMINI_API_KEY
   })
 
+  it('passes the instance-wide key to Gemini', async () => {
+    mockGenerate.mockResolvedValue({})
+    await extractExpenseInformationFromImage(GROUP, IMAGE)
+    expect(mockGenerate).toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: 'gem-test' }),
+    )
+  })
+
   it('reads the receipt with Gemini instead of OpenAI', async () => {
     mockGenerate.mockResolvedValue({
       amount: 42.5,
@@ -205,7 +224,7 @@ describe('extractExpenseInformationFromImage, with a Gemini key', () => {
       items: [{ title: 'Beer', amount: 12.5 }],
     })
 
-    expect(await extractExpenseInformationFromImage(IMAGE)).toEqual({
+    expect(await extractExpenseInformationFromImage(GROUP, IMAGE)).toEqual({
       amount: 42.5,
       categoryId: '4',
       date: '2026-03-01',
@@ -219,15 +238,70 @@ describe('extractExpenseInformationFromImage, with a Gemini key', () => {
 
   it('reports nothing extracted when Gemini answers off-schema', async () => {
     mockGenerate.mockResolvedValue({ total: 42.5, store: 'Somewhere' })
-    expect(await extractExpenseInformationFromImage(IMAGE)).toEqual(
+    expect(await extractExpenseInformationFromImage(GROUP, IMAGE)).toEqual(
       NOTHING_EXTRACTED,
     )
   })
 
   it('refuses an image URL the app did not upload', async () => {
     await expect(
-      extractExpenseInformationFromImage('https://evil.example/receipt.jpg'),
+      extractExpenseInformationFromImage(
+        GROUP,
+        'https://evil.example/receipt.jpg',
+      ),
     ).rejects.toThrow('Invalid image URL.')
     expect(mockFetchImage).not.toHaveBeenCalled()
+  })
+})
+
+describe("extractExpenseInformationFromImage, with a group's own key", () => {
+  const mockEnv = env as { GEMINI_API_KEY?: string; OPENAI_API_KEY?: string }
+
+  beforeEach(() => {
+    mockCreate.mockReset()
+    mockGenerate.mockReset()
+    mockFetchImage.mockReset()
+    mockFetchImage.mockResolvedValue({ mime_type: 'image/jpeg', data: 'AAAA' })
+    mockGenerate.mockResolvedValue({})
+    mockGroupKey.mockResolvedValue('gem-group')
+  })
+  afterEach(() => {
+    delete mockEnv.GEMINI_API_KEY
+    mockEnv.OPENAI_API_KEY = 'sk-test'
+  })
+
+  it("uses the group's key, and asks for the group it was given", async () => {
+    await extractExpenseInformationFromImage(GROUP, IMAGE)
+    expect(mockGroupKey).toHaveBeenCalledWith(GROUP)
+    expect(mockGenerate).toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: 'gem-group' }),
+    )
+    expect(mockCreate).not.toHaveBeenCalled()
+  })
+
+  it("prefers the group's key over the instance-wide one", async () => {
+    mockEnv.GEMINI_API_KEY = 'gem-instance'
+    await extractExpenseInformationFromImage(GROUP, IMAGE)
+    expect(mockGenerate).toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: 'gem-group' }),
+    )
+  })
+
+  it('reads with OpenAI when the group set no key and the instance has none', async () => {
+    mockGroupKey.mockResolvedValue(null)
+    mockCreate.mockResolvedValue({ choices: [{ message: { content: '{}' } }] })
+    await extractExpenseInformationFromImage(GROUP, IMAGE)
+    expect(mockCreate).toHaveBeenCalled()
+    expect(mockGenerate).not.toHaveBeenCalled()
+  })
+
+  it('fails loudly when no key is available at all', async () => {
+    mockGroupKey.mockResolvedValue(null)
+    delete mockEnv.OPENAI_API_KEY
+    await expect(
+      extractExpenseInformationFromImage(GROUP, IMAGE),
+    ).rejects.toThrow('No key to read the receipt with')
+    expect(mockCreate).not.toHaveBeenCalled()
+    expect(mockGenerate).not.toHaveBeenCalled()
   })
 })

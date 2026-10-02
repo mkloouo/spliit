@@ -1,4 +1,5 @@
 import { env } from './env'
+import { uploadFileNameFromUrl } from './uploads'
 
 /**
  * Hosts that uploaded receipt/document images can legitimately live on, derived
@@ -30,6 +31,10 @@ function getAllowedUploadHosts(): string[] {
  * URL (which would otherwise enable SSRF-via-OpenAI and unbounded API spend).
  */
 export function isAllowedUploadUrl(rawUrl: string): boolean {
+  // A local-folder upload is served by the app itself, under an app-relative
+  // path whose file name we generated.
+  if (uploadFileNameFromUrl(rawUrl)) return true
+
   let url: URL
   try {
     url = new URL(rawUrl)

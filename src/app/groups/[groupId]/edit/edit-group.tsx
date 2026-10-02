@@ -4,7 +4,11 @@ import { GroupForm } from '@/components/group-form'
 import { trpc } from '@/trpc/client'
 import { useCurrentGroup } from '../current-group-context'
 
-export const EditGroup = () => {
+export const EditGroup = ({
+  enableReceiptExtract,
+}: {
+  enableReceiptExtract: boolean
+}) => {
   const { groupId } = useCurrentGroup()
   const { data, isLoading } = trpc.groups.getDetails.useQuery({ groupId })
   const { mutateAsync } = trpc.groups.update.useMutation()
@@ -15,6 +19,7 @@ export const EditGroup = () => {
   return (
     <GroupForm
       group={data?.group}
+      enableReceiptExtract={enableReceiptExtract}
       onSubmit={async (groupFormValues, participantId) => {
         await mutateAsync({ groupId, participantId, groupFormValues })
         await utils.groups.invalidate()

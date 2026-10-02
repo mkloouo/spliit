@@ -1,6 +1,7 @@
 import { RecurrenceRule, SplitMode } from '@/generated/prisma/browser'
 import Decimal from 'decimal.js'
 import * as z from 'zod'
+import { GEMINI_API_KEY_MAX } from './gemini-key'
 
 export const GROUP_INFORMATION_MAX = 10_000
 export const EXPENSE_NOTES_MAX = 5_000
@@ -11,6 +12,9 @@ export const groupFormSchema = z
     information: z.string().max(GROUP_INFORMATION_MAX, 'max10000').optional(),
     currency: z.string().min(1, 'min1').max(5, 'max5'),
     currencyCode: z.union([z.string().length(3).nullish(), z.literal('')]), // ISO-4217 currency code
+    // Write-only: the form sends a mask back when it was left alone, and the
+    // server decides what that means (see `geminiApiKeyUpdate`).
+    geminiApiKey: z.string().max(GEMINI_API_KEY_MAX, 'max200').optional(),
     participants: z
       .array(
         z.object({

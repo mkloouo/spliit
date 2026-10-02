@@ -1,17 +1,10 @@
-import { env } from './env'
 import { fetchImageAsInlineData, generateJsonFromImage } from './gemini'
 
+// The key is passed in by the caller (a group's own, or the instance-wide one);
+// only the model name still comes from the environment.
 jest.mock('./env', () => ({
-  env: {
-    GEMINI_API_KEY: 'gem-test' as string | undefined,
-    GEMINI_MODEL_RECEIPT_EXTRACT: 'test-gemini-model',
-  },
+  env: { GEMINI_MODEL_RECEIPT_EXTRACT: 'test-gemini-model' },
 }))
-
-const mockEnv = env as {
-  GEMINI_API_KEY?: string
-  GEMINI_MODEL_RECEIPT_EXTRACT: string
-}
 
 const mockFetch = jest.fn()
 global.fetch = mockFetch as unknown as typeof fetch
@@ -27,13 +20,15 @@ const SCHEMA = { type: 'object' as const }
 const IMAGE = { mime_type: 'image/jpeg', data: 'AAAA' }
 
 const generate = () =>
-  generateJsonFromImage({ prompt: 'read it', schema: SCHEMA, image: IMAGE })
+  generateJsonFromImage({
+    apiKey: 'gem-test',
+    prompt: 'read it',
+    schema: SCHEMA,
+    image: IMAGE,
+  })
 
 describe('generateJsonFromImage', () => {
-  beforeEach(() => {
-    mockFetch.mockReset()
-    mockEnv.GEMINI_API_KEY = 'gem-test'
-  })
+  beforeEach(() => mockFetch.mockReset())
 
   it('sends the key in a header, not the URL, and asks for the schema', async () => {
     mockFetch.mockResolvedValue(answer([{ text: '{"amount":1}' }]))
@@ -82,12 +77,6 @@ describe('generateJsonFromImage', () => {
   it('throws on any other HTTP error, so the retry is offered', async () => {
     mockFetch.mockResolvedValue({ ok: false, status: 503 })
     await expect(generate()).rejects.toThrow('HTTP 503')
-  })
-
-  it('throws before calling out when no key is set', async () => {
-    delete mockEnv.GEMINI_API_KEY
-    await expect(generate()).rejects.toThrow('GEMINI_API_KEY is not set.')
-    expect(mockFetch).not.toHaveBeenCalled()
   })
 })
 

@@ -54,19 +54,17 @@ export async function fetchImageAsInlineData(url: string) {
  * extracted" rather than filling a form with guesses.
  */
 export async function generateJsonFromImage({
+  apiKey,
   prompt,
   schema,
   image,
 }: {
+  /** The group's own key, or the instance-wide one. */
+  apiKey: string
   prompt: string
   schema: Record<string, unknown>
   image: { mime_type: string; data: string }
 }): Promise<unknown | null> {
-  const apiKey = env.GEMINI_API_KEY
-  if (!apiKey) {
-    throw new Error('GEMINI_API_KEY is not set.')
-  }
-
   const call = (withSchema: boolean) =>
     fetch(`${API_BASE}/${env.GEMINI_MODEL_RECEIPT_EXTRACT}:generateContent`, {
       method: 'POST',

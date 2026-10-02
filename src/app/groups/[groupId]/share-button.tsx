@@ -16,7 +16,9 @@ import { Share } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
 type Props = {
-  group: Group
+  // Only what the button shares, so a group loaded without its secrets (see
+  // `getGroup`) still fits.
+  group: Pick<Group, 'id' | 'name'>
 }
 
 export function ShareButton({ group }: Props) {

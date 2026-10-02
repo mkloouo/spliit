@@ -4,6 +4,7 @@ import {
   RecurrenceRule,
   RecurringExpenseLink,
 } from '@/generated/prisma/client'
+import { geminiApiKeyUpdate } from '@/lib/gemini-key'
 import { prisma } from '@/lib/prisma'
 import { randomId } from '@/lib/random'
 import { ExpenseFormValues, GroupFormValues } from '@/lib/schemas'
@@ -19,6 +20,7 @@ export async function createGroup(groupFormValues: GroupFormValues) {
       information: groupFormValues.information,
       currency: groupFormValues.currency,
       currencyCode: groupFormValues.currencyCode,
+      geminiApiKey: geminiApiKeyUpdate(groupFormValues.geminiApiKey),
       participants: {
         createMany: {
           data: groupFormValues.participants.map(({ name }) => ({
@@ -173,6 +175,8 @@ export async function getGroups(groupIds: string[]) {
     await prisma.group.findMany({
       where: { id: { in: groupIds } },
       include: { _count: { select: { participants: true } } },
+      // Never to the client, see `getGroup`.
+      omit: { geminiApiKey: true },
     })
   ).map((group) => ({
     ...group,
@@ -337,6 +341,7 @@ export async function updateGroup(
       information: groupFormValues.information,
       currency: groupFormValues.currency,
       currencyCode: groupFormValues.currencyCode,
+      geminiApiKey: geminiApiKeyUpdate(groupFormValues.geminiApiKey),
       participants: {
         deleteMany: existingGroup.participants.filter(
           (p) => !groupFormValues.participants.some((p2) => p2.id === p.id),
@@ -363,10 +368,28 @@ export async function updateGroup(
 }
 
 export async function getGroup(groupId: string) {
-  return prisma.group.findUnique({
+  const group = await prisma.group.findUnique({
     where: { id: groupId },
     include: { participants: true },
   })
+  if (!group) return null
+
+  // The group's Gemini key is the one thing the group link does not grant read
+  // access to: anyone holding the link may scan a receipt with it, nobody gets
+  // to read it back out. Stripping it here covers every caller, since this is
+  // the only way the app loads a group; `getGroupGeminiApiKey` is the one way
+  // to read the key itself.
+  const { geminiApiKey, ...rest } = group
+  return { ...rest, hasGeminiApiKey: !!geminiApiKey }
+}
+
+/** The group's own Gemini key, if it set one. Server-side callers only. */
+export async function getGroupGeminiApiKey(groupId: string) {
+  const group = await prisma.group.findUnique({
+    where: { id: groupId },
+    select: { geminiApiKey: true },
+  })
+  return group?.geminiApiKey ?? null
 }
 
 export async function getCategories() {

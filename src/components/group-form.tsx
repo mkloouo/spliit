@@ -34,6 +34,7 @@ import { Locale } from '@/i18n/request'
 import { useAnalytics } from '@/lib/analytics/context'
 import { getGroup } from '@/lib/api'
 import { defaultCurrencyList, getCurrency } from '@/lib/currency'
+import { GEMINI_API_KEY_MASK } from '@/lib/gemini-key'
 import {
   GROUP_INFORMATION_MAX,
   groupFormSchema,
@@ -57,6 +58,8 @@ export type Props = {
   protectedParticipantIds?: string[]
   /** Resolved on the server, since the runtime variable is not public. */
   defaultCurrencyCode?: string
+  /** Same, and what decides whether the group's Gemini key is worth asking for. */
+  enableReceiptExtract?: boolean
 }
 
 export function GroupForm({
@@ -64,6 +67,7 @@ export function GroupForm({
   onSubmit,
   protectedParticipantIds = [],
   defaultCurrencyCode = 'USD',
+  enableReceiptExtract = false,
 }: Props) {
   const locale = useLocale()
   const t = useTranslations('GroupForm')
@@ -75,6 +79,9 @@ export function GroupForm({
           information: group.information ?? '',
           currency: group.currency ?? '',
           currencyCode: group.currencyCode ?? '',
+          // The saved key never reaches the client, so the field starts masked
+          // and the server reads the mask as "leave it alone".
+          geminiApiKey: group.hasGeminiApiKey ? GEMINI_API_KEY_MASK : '',
           participants: group.participants,
         }
       : {
@@ -329,6 +336,50 @@ export function GroupForm({
             </Button>
           </CardFooter>
         </Card>
+
+        {group && enableReceiptExtract && (
+          <Card className="mb-4">
+            <CardHeader>
+              <CardTitle>{t('ReceiptScanning.title')}</CardTitle>
+              <CardDescription>
+                {t('ReceiptScanning.description')}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <FormField
+                control={form.control}
+                name="geminiApiKey"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>
+                      {t('ReceiptScanning.GeminiApiKeyField.label')}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        className="text-base"
+                        autoComplete="off"
+                        spellCheck={false}
+                        placeholder={t(
+                          'ReceiptScanning.GeminiApiKeyField.placeholder',
+                        )}
+                        {...field}
+                        value={field.value ?? ''}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        group.hasGeminiApiKey
+                          ? 'ReceiptScanning.GeminiApiKeyField.savedDescription'
+                          : 'ReceiptScanning.GeminiApiKeyField.description',
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="mb-4">
           <CardHeader>

@@ -23,6 +23,13 @@ model Group {
   expenses     Expense[]
   activities   Activity[]
   createdAt    DateTime      @default(now())
+
+  /// The group's own key for reading receipts with Gemini, which overrides the
+  /// instance-wide GEMINI_API_KEY. Write-only as far as the app is concerned:
+  /// `getGroup` strips it, so holding the group link lets you *use* the key,
+  /// never read it back. Stored as given — the database is as trusted as the
+  /// rest of the group's contents.
+  geminiApiKey String?
 }
 
 model Participant {

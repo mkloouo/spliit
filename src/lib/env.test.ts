@@ -64,11 +64,38 @@ describe('ANALYTICS_PROVIDER', () => {
   })
 })
 
-describe('AI feature keys', () => {
-  it('lets the receipt reader run on either an OpenAI or a Gemini key', () => {
-    expect(() => loadEnv({ ENABLE_RECEIPT_EXTRACT: 'true' })).toThrow(
-      /OPENAI_API_KEY or GEMINI_API_KEY/,
+describe('expense documents storage', () => {
+  it('needs an uploads folder or an S3 bucket', () => {
+    expect(() => loadEnv({ ENABLE_EXPENSE_DOCUMENTS: 'true' })).toThrow(
+      /UPLOADS_DIR or S3_\*/,
     )
+    expect(() =>
+      loadEnv({ ENABLE_EXPENSE_DOCUMENTS: 'true', UPLOADS_DIR: './uploads' }),
+    ).not.toThrow()
+    expect(() =>
+      loadEnv({
+        ENABLE_EXPENSE_DOCUMENTS: 'true',
+        S3_UPLOAD_BUCKET: 'bucket',
+        S3_UPLOAD_KEY: 'key',
+        S3_UPLOAD_REGION: 'eu-north-1',
+        S3_UPLOAD_SECRET: 'secret',
+      }),
+    ).not.toThrow()
+  })
+
+  it('reads a blank uploads folder as unset', () => {
+    expect(loadEnv({ UPLOADS_DIR: '  ' }).UPLOADS_DIR).toBeUndefined()
+    expect(() =>
+      loadEnv({ ENABLE_EXPENSE_DOCUMENTS: 'true', UPLOADS_DIR: '  ' }),
+    ).toThrow(/UPLOADS_DIR or S3_\*/)
+  })
+})
+
+describe('AI feature keys', () => {
+  it('lets the receipt reader be enabled with no key of its own', () => {
+    // A group can carry its own Gemini key, so an instance-wide one is
+    // optional; a scan with no key anywhere fails at scan time.
+    expect(() => loadEnv({ ENABLE_RECEIPT_EXTRACT: 'true' })).not.toThrow()
     expect(() =>
       loadEnv({ ENABLE_RECEIPT_EXTRACT: 'true', OPENAI_API_KEY: 'sk-test' }),
     ).not.toThrow()

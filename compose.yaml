@@ -6,6 +6,10 @@ services:
       - 3000:3000
     env_file:
       - container.env
+    # Uncomment together with UPLOADS_DIR in container.env to keep expense
+    # documents on the host instead of in an S3 bucket.
+    # volumes:
+    #   - ./uploads:/usr/app/uploads
     depends_on:
       db:
         condition: service_healthy

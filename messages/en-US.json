@@ -142,6 +142,16 @@
       "Jane": "Jane",
       "Jack": "Jack"
     },
+    "ReceiptScanning": {
+      "title": "Receipt scanning",
+      "description": "This group can read receipts with its own Gemini API key, instead of the one this instance is configured with.",
+      "GeminiApiKeyField": {
+        "label": "Gemini API key",
+        "placeholder": "AIza…",
+        "description": "Create one at Google AI Studio. Everyone with the group link can scan receipts with it, but nobody can read it back.",
+        "savedDescription": "A key is saved. Type a new one to replace it, or empty the field to remove it."
+      }
+    },
     "Settings": {
       "title": "Local settings",
       "description": "These settings are set per-device, and are used to customize your experience.",

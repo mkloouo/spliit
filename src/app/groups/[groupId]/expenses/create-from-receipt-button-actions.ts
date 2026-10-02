@@ -1,11 +1,12 @@
 'use server'
 
-import { getCategories } from '@/lib/api'
+import { getCategories, getGroupGeminiApiKey } from '@/lib/api'
 import { env } from '@/lib/env'
 import { getRuntimeFeatureFlags } from '@/lib/featureFlags'
 import { fetchImageAsInlineData, generateJsonFromImage } from '@/lib/gemini'
 import { getOpenAIClient } from '@/lib/openai'
 import { isAllowedUploadUrl } from '@/lib/uploaded-image-url'
+import { readUploadAsInlineData } from '@/lib/uploads'
 import { formatCategoryForAIPrompt } from '@/lib/utils'
 import { z } from 'zod'
 
@@ -75,9 +76,17 @@ list if no line items are legible. The items do not have to add up to the
 total — a receipt may also carry tax, tips or discounts.`
 }
 
-async function extractWithGemini(imageUrl: string, prompt: string) {
-  const image = await fetchImageAsInlineData(imageUrl)
+async function extractWithGemini(
+  apiKey: string,
+  imageUrl: string,
+  prompt: string,
+) {
+  // A locally stored document is read off disk; anything else is downloaded.
+  const image =
+    (await readUploadAsInlineData(imageUrl)) ??
+    (await fetchImageAsInlineData(imageUrl))
   return generateJsonFromImage({
+    apiKey,
     prompt,
     schema: responseJsonSchema,
     image,
@@ -85,6 +94,10 @@ async function extractWithGemini(imageUrl: string, prompt: string) {
 }
 
 async function extractWithOpenAI(imageUrl: string, prompt: string) {
+  // OpenAI fetches `image_url` itself, which a locally stored document behind
+  // this app is not reachable for, so that one is inlined as a data URL.
+  const local = await readUploadAsInlineData(imageUrl)
+  const url = local ? `data:${local.mime_type};base64,${local.data}` : imageUrl
   const openai = getOpenAIClient()
   const completion = await openai.chat.completions.create({
     model: env.OPENAI_MODEL_RECEIPT_EXTRACT,
@@ -100,7 +113,7 @@ async function extractWithOpenAI(imageUrl: string, prompt: string) {
       { role: 'user', content: [{ type: 'text', text: prompt }] },
       {
         role: 'user',
-        content: [{ type: 'image_url', image_url: { url: imageUrl } }],
+        content: [{ type: 'image_url', image_url: { url } }],
       },
     ],
   })
@@ -113,7 +126,10 @@ async function extractWithOpenAI(imageUrl: string, prompt: string) {
   }
 }
 
-export async function extractExpenseInformationFromImage(imageUrl: string) {
+export async function extractExpenseInformationFromImage(
+  groupId: string,
+  imageUrl: string,
+) {
   'use server'
 
   // Enforce the feature flag server-side: the UI gate only hides the button, it
@@ -133,9 +149,19 @@ export async function extractExpenseInformationFromImage(imageUrl: string) {
   const categories = await getCategories()
   const prompt = receiptPrompt(categories)
 
-  // Gemini when a key for it is configured, OpenAI otherwise.
-  const raw = env.GEMINI_API_KEY
-    ? await extractWithGemini(imageUrl, prompt)
+  // The group's own key first, then the instance-wide one.
+  const geminiApiKey =
+    (await getGroupGeminiApiKey(groupId)) ?? env.GEMINI_API_KEY
+
+  if (!geminiApiKey && !env.OPENAI_API_KEY) {
+    throw new Error(
+      'No key to read the receipt with: set one in the group settings, or GEMINI_API_KEY / OPENAI_API_KEY on the server.',
+    )
+  }
+
+  // Gemini when a key for it is available, OpenAI otherwise.
+  const raw = geminiApiKey
+    ? await extractWithGemini(geminiApiKey, imageUrl, prompt)
     : await extractWithOpenAI(imageUrl, prompt)
 
   const parsed = (() => {

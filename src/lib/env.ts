@@ -72,6 +72,13 @@ const envSchema = z
       z.string().trim().optional(),
     ),
     NEXT_PUBLIC_DEFAULT_CURRENCY_CODE: z.string().optional(),
+    // Store expense documents in this folder instead of S3. Any path the
+    // server can write to; it is created on the first upload. When set, the
+    // S3_* variables are not needed.
+    UPLOADS_DIR: z.preprocess(
+      interpretBlankEnvVarAsUndefined,
+      z.string().trim().optional(),
+    ),
     S3_UPLOAD_KEY: z.string().optional(),
     S3_UPLOAD_SECRET: z.string().optional(),
     S3_UPLOAD_BUCKET: z.string().optional(),
@@ -176,6 +183,8 @@ const envSchema = z
       env.ENABLE_CATEGORY_EXTRACT || env.NEXT_PUBLIC_ENABLE_CATEGORY_EXTRACT
     if (
       enableExpenseDocuments &&
+      // A local uploads folder replaces S3 entirely.
+      !env.UPLOADS_DIR &&
       // S3_UPLOAD_ENDPOINT is fully optional as it will only be used for providers other than AWS
       (!env.S3_UPLOAD_BUCKET ||
         !env.S3_UPLOAD_KEY ||
@@ -185,17 +194,12 @@ const envSchema = z
       ctx.addIssue({
         code: ZodIssueCode.custom,
         message:
-          'If ENABLE_EXPENSE_DOCUMENTS is set, then S3_* must be set too',
+          'If ENABLE_EXPENSE_DOCUMENTS is set, then UPLOADS_DIR or S3_* must be set too',
       })
     }
-    // The receipt reader accepts either key; the category reader is OpenAI only.
-    if (enableReceiptExtract && !env.OPENAI_API_KEY && !env.GEMINI_API_KEY) {
-      ctx.addIssue({
-        code: ZodIssueCode.custom,
-        message:
-          'If ENABLE_RECEIPT_EXTRACT is set, then OPENAI_API_KEY or GEMINI_API_KEY must be set too',
-      })
-    }
+    // No key check for the receipt reader: a group can carry its own Gemini
+    // key, so an instance may legitimately enable the feature with none of its
+    // own. A scan with no key available anywhere fails at scan time instead.
     if (enableCategoryExtract && !env.OPENAI_API_KEY) {
       ctx.addIssue({
         code: ZodIssueCode.custom,
