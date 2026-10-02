@@ -1160,6 +1160,26 @@ export function ExpenseForm({
                       enforceCurrencyPattern(value, groupCurrency)
                     }
                     newItemId={randomId}
+                    total={itemsTotal}
+                    onUseAsAmount={
+                      itemsMismatch
+                        ? () =>
+                            form.setValue(
+                              'amount',
+                              Number(
+                                formatAmountAsDecimal(
+                                  itemsTotal,
+                                  groupCurrency,
+                                ),
+                              ),
+                              {
+                                shouldDirty: true,
+                                shouldTouch: true,
+                                shouldValidate: true,
+                              },
+                            )
+                        : undefined
+                    }
                   />
                   <FormMessage />
                 </FormItem>
@@ -1167,37 +1187,6 @@ export function ExpenseForm({
             />
             {items.length > 0 && (
               <div className="mt-4 space-y-3">
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-muted-foreground">
-                    {t('ItemsField.total')}
-                  </span>
-                  <span>
-                    {formatCurrency(groupCurrency, itemsTotal, locale)}
-                  </span>
-                  {itemsMismatch && (
-                    <Button
-                      type="button"
-                      variant="link"
-                      className="h-auto p-0"
-                      onClick={() =>
-                        form.setValue(
-                          'amount',
-                          Number(
-                            formatAmountAsDecimal(itemsTotal, groupCurrency),
-                          ),
-                          {
-                            shouldDirty: true,
-                            shouldTouch: true,
-                            shouldValidate: true,
-                          },
-                        )
-                      }
-                    >
-                      {t('ItemsField.useAsAmount')}
-                    </Button>
-                  )}
-                </div>
-
                 {redundantItem && (
                   <div className="flex gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
                     <TriangleAlert className="w-4 h-4 mt-0.5 shrink-0" />

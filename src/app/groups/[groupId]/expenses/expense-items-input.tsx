@@ -10,11 +10,46 @@ import {
 } from '@/components/ui/popover'
 import { Currency } from '@/lib/currency'
 import { ExpenseFormInput } from '@/lib/schemas'
-import { cn } from '@/lib/utils'
+import { cn, formatCurrency } from '@/lib/utils'
 import { Plus, Users, X } from 'lucide-react'
-import { useTranslations } from 'next-intl'
+import { useLocale, useTranslations } from 'next-intl'
 
 type Item = NonNullable<ExpenseFormInput['items']>[number]
+
+/**
+ * One row's columns, shared by the item rows, the header and the total so the
+ * three line up. A narrow screen gives the title a line of its own — item
+ * names are long enough that sharing one with the amount truncates most of
+ * them — while the delete button keeps a column of its own at both widths, so
+ * the amounts stay in one column to read down.
+ */
+const ROW =
+  'grid grid-cols-[minmax(0,1fr)_auto_auto] sm:grid-cols-[minmax(0,1fr)_11rem_7rem_2rem] gap-2 sm:gap-3 items-center'
+
+/**
+ * A field that stays out of the way until it is pointed at. Four boxed inputs
+ * per row turn a scanned receipt into a wall of borders; these draw one only
+ * on hover or focus.
+ */
+const QUIET_FIELD =
+  'h-9 border-transparent bg-transparent shadow-none hover:border-input focus-visible:border-input'
+
+/**
+ * Where a row sits. A line with a negative amount is an adjustment — a rebate,
+ * a coupon — and belongs under the items it comes off, below its own heading.
+ * This is CSS `order` rather than a sorted list on purpose: typing a minus into
+ * an amount moves its row, and moving the input in the DOM would take the focus
+ * out of the field being typed into.
+ */
+const ORDER = {
+  header: 0,
+  item: 1,
+  adjustmentsHeading: 2,
+  adjustment: 3,
+  total: 4,
+}
+
+const isAdjustment = (item: Item) => Number(item.amount) < 0
 
 /**
  * The lines an expense is made up of: what each one was, what it cost, and who
@@ -31,6 +66,10 @@ export function ExpenseItemsInput({
   /** Formats a typed amount the way the rest of the form does. */
   enforceCurrencyPattern,
   newItemId,
+  /** What the items add up to, in minor units. */
+  total,
+  /** Offered only when the items do not add up to the expense amount. */
+  onUseAsAmount,
 }: {
   items: Item[]
   updateItems: (items: Item[]) => void
@@ -38,85 +77,142 @@ export function ExpenseItemsInput({
   currency: Currency
   enforceCurrencyPattern: (value: string) => string
   newItemId: () => string
+  total: number
+  onUseAsAmount?: () => void
 }) {
   const t = useTranslations('ExpenseForm.ItemsField')
+  const locale = useLocale()
 
   const replace = (index: number, item: Item) =>
     updateItems(items.map((existing, i) => (i === index ? item : existing)))
 
+  const hasAdjustments = items.some(isAdjustment)
+
   return (
     <div>
-      {items.length === 0 && (
+      {items.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t('empty')}</p>
-      )}
-      {items.map((item, index) => (
-        // On a phone the title gets a line of its own — item names are long
-        // enough that sharing one with the amount truncates most of them — and
-        // the three narrow controls share the line below it. From `sm` up it is
-        // all one row.
-        <div
-          key={item.id}
-          className="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_auto_auto] gap-2 items-center border-t last-of-type:border-b -mx-6 px-6 py-2"
-        >
-          <Input
-            className="text-base col-span-2 sm:col-span-1 sm:-my-2 sm:min-w-[140px]"
-            maxLength={200}
-            placeholder={t('titlePlaceholder')}
-            value={item.title}
-            onChange={(event) =>
-              replace(index, { ...item, title: event.target.value })
-            }
-          />
-          <ItemParticipants
-            participants={participants}
-            selected={item.participants ?? []}
-            onChange={(selected) =>
-              replace(index, { ...item, participants: selected })
-            }
-          />
-          <div className="flex gap-1 items-center sm:-my-2">
-            <span className="text-sm">{currency.symbol}</span>
-            <Input
-              className="text-base w-[90px]"
-              type="text"
-              inputMode="decimal"
-              step={10 ** -currency.decimal_digits}
-              value={item.amount as string | number}
-              onChange={(event) =>
-                replace(index, {
-                  ...item,
-                  amount: enforceCurrencyPattern(event.target.value),
-                })
-              }
-            />
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="shrink-0"
-              title={t('remove')}
-              onClick={() => updateItems(items.filter((_, i) => i !== index))}
+      ) : (
+        <div className="flex flex-col">
+          <div
+            style={{ order: ORDER.header }}
+            className={cn(
+              ROW,
+              'hidden sm:grid pb-2 border-b text-xs font-medium uppercase tracking-wide text-muted-foreground',
+            )}
+          >
+            <div className="px-3">{t('itemColumn')}</div>
+            <div className="px-3">{t('forWhom')}</div>
+            <div className="px-3 text-right">{t('amountColumn')}</div>
+            <div />
+          </div>
+
+          {items.map((item, index) => (
+            <div
+              key={item.id}
+              style={{
+                order: isAdjustment(item) ? ORDER.adjustment : ORDER.item,
+              }}
+              className={cn(ROW, 'py-1 border-b border-border/60')}
             >
-              <X className="w-4 h-4" />
-            </Button>
+              <Input
+                className={cn(
+                  QUIET_FIELD,
+                  'text-base sm:text-sm col-span-3 sm:col-span-1',
+                )}
+                maxLength={200}
+                placeholder={t('titlePlaceholder')}
+                value={item.title}
+                onChange={(event) =>
+                  replace(index, { ...item, title: event.target.value })
+                }
+              />
+              <ItemParticipants
+                participants={participants}
+                selected={item.participants ?? []}
+                onChange={(selected) =>
+                  replace(index, { ...item, participants: selected })
+                }
+              />
+              <Input
+                className={cn(
+                  QUIET_FIELD,
+                  'text-base sm:text-sm w-[5.5rem] sm:w-full text-right tabular-nums',
+                  isAdjustment(item) && 'text-amber-700 dark:text-amber-500',
+                )}
+                type="text"
+                inputMode="decimal"
+                step={10 ** -currency.decimal_digits}
+                value={item.amount as string | number}
+                onChange={(event) =>
+                  replace(index, {
+                    ...item,
+                    amount: enforceCurrencyPattern(event.target.value),
+                  })
+                }
+              />
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="w-8 h-8 shrink-0 text-muted-foreground hover:text-foreground"
+                title={t('remove')}
+                onClick={() => updateItems(items.filter((_, i) => i !== index))}
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+          ))}
+
+          {hasAdjustments && (
+            <div
+              style={{ order: ORDER.adjustmentsHeading }}
+              className="px-3 pt-3 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground"
+            >
+              {t('adjustments')}
+            </div>
+          )}
+
+          <div style={{ order: ORDER.total }} className={cn(ROW, 'pt-3')}>
+            <span className="px-3 text-sm text-muted-foreground">
+              {t('total')}
+            </span>
+            <span className="hidden sm:block" />
+            <span className="px-3 text-sm font-semibold text-right tabular-nums">
+              {formatCurrency(currency, total, locale)}
+            </span>
+            <span className="w-8 sm:w-auto" />
           </div>
         </div>
-      ))}
-      <Button
-        type="button"
-        variant="secondary"
-        size="sm"
-        className="mt-4"
-        onClick={() =>
-          updateItems([
-            ...items,
-            { id: newItemId(), title: '', amount: '', participants: [] },
-          ])
-        }
-      >
-        <Plus className="w-4 h-4 mr-2" />
-        {t('add')}
-      </Button>
+      )}
+
+      <div className="flex flex-wrap items-center justify-between gap-2 mt-3">
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="text-muted-foreground hover:text-foreground"
+          onClick={() =>
+            updateItems([
+              ...items,
+              { id: newItemId(), title: '', amount: '', participants: [] },
+            ])
+          }
+        >
+          <Plus className="w-4 h-4 mr-2" />
+          {t('add')}
+        </Button>
+        {onUseAsAmount && (
+          <Button
+            type="button"
+            variant="link"
+            className="h-auto p-0"
+            onClick={onUseAsAmount}
+          >
+            {t('useAsAmount')}
+          </Button>
+        )}
+      </div>
     </div>
   )
 }
@@ -150,9 +246,10 @@ function ItemParticipants({
           variant="outline"
           size="sm"
           className={cn(
-            // Fills its cell on the phone layout, stays compact next to the
-            // title on a wide one.
-            'h-10 w-full justify-start font-normal sm:-my-2 sm:w-auto sm:max-w-[160px]',
+            // A pill on a phone, where there is no hover to reveal an outline;
+            // as quiet as the fields beside it once the column has room.
+            'h-9 w-full justify-start font-normal rounded-full',
+            'sm:rounded-md sm:border-transparent sm:bg-transparent sm:shadow-none sm:hover:border-input',
             names.length === 0 && 'text-muted-foreground',
           )}
           title={t('forWhom')}

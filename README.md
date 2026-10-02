@@ -352,6 +352,15 @@ Every expense can list the items it was made up of — what each line was, what 
 
 Ticking **Split by items** turns those assignments into the expense's split: each item's price goes to the participants who share it, and anything the items do not account for — tax, a tip, a discount, a line nobody claimed — is shared evenly between them. The shares always add up to the expense amount to the minor unit, and they are saved as an ordinary _by amount_ split, so balances, totals and the CSV export need to know nothing about items.
 
+The list reads as a table: a column each for the item, who shares it and the
+amount, with the fields themselves drawing a border only on hover or focus — a
+scanned receipt is twenty rows long, and twenty rows of boxed inputs is a wall.
+A line with a negative amount is an adjustment (a rebate, a coupon) and is
+grouped under its own heading below the items, by CSS `order` rather than by
+sorting the list, so typing a minus into an amount does not move the field out
+from under the cursor. On a phone the title takes a line of its own and the
+other three controls share the line below it.
+
 Receipt scanning fills the items in automatically when the feature above is enabled.
 
 A receipt's own summary lines — a total of all discounts, a subtotal — are not
