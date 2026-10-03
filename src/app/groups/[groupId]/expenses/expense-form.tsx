@@ -34,6 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { useToast } from '@/components/ui/use-toast'
 import { RecurrenceRule, SplitMode } from '@/generated/prisma/browser'
 import { Locale } from '@/i18n/request'
 import { useAnalytics } from '@/lib/analytics/context'
@@ -333,6 +334,7 @@ export function ExpenseForm({
   const [isCategoryLoading, setCategoryLoading] = useState(false)
   const activeUserId = useActiveUser(group.id)
   const sendEvent = useAnalytics()
+  const { toast } = useToast()
 
   const submit = async (values: ExpenseFormValues) => {
     sendEvent(
@@ -505,7 +507,20 @@ export function ExpenseForm({
   // The items drive the split: each item's price goes to the participants who
   // share it, and anything the items do not account for is shared between them.
   const items = form.watch('items') ?? []
-  useEffect(() => {
+
+  /**
+   * Writes the split the items imply into `paidFor`.
+   *
+   * Called from an effect as the items change, and again from the submit
+   * handler: a `BY_AMOUNT` split has to add up to the amount exactly, and an
+   * effect has not necessarily run by the time a click lands in the same
+   * gesture as the edit before it — blurring an amount field by pressing Save
+   * is enough. Validation would then see the previous split against the new
+   * amount, fail on a message rendered far down the page, and look like the
+   * button had done nothing; the effect would then catch up and a second press
+   * would work.
+   */
+  const applyItemisedSplit = () => {
     if (!splitByItems) return
     const shares = itemisedShares(
       amountAsMinorUnits(Number(form.getValues('amount')) || 0, groupCurrency),
@@ -531,6 +546,11 @@ export function ExpenseForm({
       })),
       options,
     )
+  }
+
+  useEffect(() => {
+    applyItemisedSplit()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [splitByItems, JSON.stringify(items), form.watch('amount')])
 
   /** The items' prices added up, in minor units. */
@@ -722,12 +742,21 @@ export function ExpenseForm({
   return (
     <Form {...form}>
       <form
-        onSubmit={form.handleSubmit(submit, (errors) => {
-          // A field whose error nothing renders — `documents`, say — would
-          // otherwise just make the save button do nothing at all, with no
-          // way to tell why.
-          console.error('Expense form not saved, invalid:', errors)
-        })}
+        onSubmit={(event) => {
+          // Before validation, not after: see `applyItemisedSplit`.
+          applyItemisedSplit()
+          return form.handleSubmit(submit, (errors) => {
+            // Several of these messages render far from the button, or on a
+            // field nothing shows at all — `documents`, say. Without this the
+            // button just does nothing, with no way to tell why.
+            console.error('Expense form not saved, invalid:', errors)
+            toast({
+              title: t('invalidToast.title'),
+              description: t('invalidToast.description'),
+              variant: 'destructive',
+            })
+          })(event)
+        }}
       >
         <Card>
           <CardHeader>

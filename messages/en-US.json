@@ -316,6 +316,10 @@
     "creating": "Creating…",
     "save": "Save",
     "saving": "Saving…",
+    "invalidToast": {
+      "title": "This expense cannot be saved yet",
+      "description": "Something on the form needs fixing. Scroll through it for the message in red — a split that does not add up to the amount is the usual one."
+    },
     "cancel": "Cancel",
     "reimbursement": "Reimbursement"
   },
